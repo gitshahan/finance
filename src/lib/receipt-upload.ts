@@ -1,10 +1,18 @@
 import type { FileUIPart } from "ai";
-import { guessReceiptUploadContentType } from "@/lib/receipt-image-url";
+import {
+  getReceiptUploadSizeLimitError,
+  guessReceiptUploadContentType,
+} from "@/lib/receipt-image-url";
 
 export function uploadReceiptImage(
   file: File,
   onProgress?: (percent: number) => void,
 ): Promise<FileUIPart> {
+  const sizeLimitError = getReceiptUploadSizeLimitError(file);
+  if (sizeLimitError) {
+    return Promise.reject(new Error(sizeLimitError));
+  }
+
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();

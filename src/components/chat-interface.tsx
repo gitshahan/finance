@@ -6,7 +6,7 @@ import { DefaultChatTransport, type FileUIPart } from "ai";
 import type { UIMessage } from "ai";
 import { ChatMessageContent } from "@/components/chat-message-content";
 import { ReceiptImageButton } from "@/components/receipt-image-button";
-import { isCsvFile } from "@/lib/receipt-image-url";
+import { getReceiptUploadSizeLimitError, isCsvFile } from "@/lib/receipt-image-url";
 import { uploadReceiptImage } from "@/lib/receipt-upload";
 import type { UserTokenUsage } from "@/lib/token-usage-store";
 
@@ -129,6 +129,16 @@ export function ChatInterface({
   }
 
   async function handleReceiptSelect(file: File) {
+    const sizeLimitError = getReceiptUploadSizeLimitError(file);
+    if (sizeLimitError) {
+      setAttachedFile(null);
+      setUploadedReceipt(null);
+      setUploadError(sizeLimitError);
+      setIsUploadingReceipt(false);
+      setUploadProgress(undefined);
+      return;
+    }
+
     setAttachedFile(file);
     setUploadedReceipt(null);
     setUploadError(null);

@@ -52,6 +52,25 @@ export function isSupportedReceiptUpload(file: File) {
   return isImageFile(file) || isCsvFile(file);
 }
 
+export const MAX_RECEIPT_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_RECEIPT_CSV_UPLOAD_BYTES = 1 * 1024 * 1024;
+
+export function getReceiptUploadMaxBytes(file: File) {
+  return isImageFile(file)
+    ? MAX_RECEIPT_IMAGE_UPLOAD_BYTES
+    : MAX_RECEIPT_CSV_UPLOAD_BYTES;
+}
+
+export function getReceiptUploadSizeLimitError(file: File): string | null {
+  if (file.size <= getReceiptUploadMaxBytes(file)) {
+    return null;
+  }
+
+  return isImageFile(file)
+    ? "File exceeds 5MB limit."
+    : "File exceeds 1MB limit.";
+}
+
 export function isCsvFilename(filename: string) {
   return filename.split(".").pop()?.toLowerCase() === "csv";
 }

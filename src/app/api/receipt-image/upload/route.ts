@@ -2,13 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import { put } from "@vercel/blob";
 import { getReceiptBlobPathPrefix } from "@/lib/receipt-blob";
 import {
+  getReceiptUploadSizeLimitError,
   guessReceiptUploadContentType,
   isSupportedReceiptUpload,
 } from "@/lib/receipt-image-url";
 
 export const maxDuration = 30;
-
-const MAX_RECEIPT_UPLOAD_BYTES = 1 * 1024 * 1024;
 
 export async function POST(request: Request) {
   try {
@@ -39,8 +38,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (file.size > MAX_RECEIPT_UPLOAD_BYTES) {
-      return new Response("File exceeds 1MB limit.", { status: 400 });
+    const sizeLimitError = getReceiptUploadSizeLimitError(file);
+    if (sizeLimitError) {
+      return new Response(sizeLimitError, { status: 400 });
     }
 
     const contentType = file.type || guessReceiptUploadContentType(file.name);
