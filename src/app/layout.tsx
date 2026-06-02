@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AUTH_COMPLETE_URL } from "@/lib/auth-redirect";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,8 +33,10 @@ export default function RootLayout({
         <ClerkProvider
           signInUrl="/sign-in"
           signUpUrl="/sign-up"
-          signInFallbackRedirectUrl="/dashboard"
-          signUpFallbackRedirectUrl="/dashboard"
+          signInForceRedirectUrl={AUTH_COMPLETE_URL}
+          signUpForceRedirectUrl={AUTH_COMPLETE_URL}
+          signInFallbackRedirectUrl={AUTH_COMPLETE_URL}
+          signUpFallbackRedirectUrl={AUTH_COMPLETE_URL}
         >
           {children}
         </ClerkProvider>

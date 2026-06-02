@@ -32,6 +32,15 @@ BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 
 Then run `pnpm dev`, sign in at `http://localhost:3000/sign-in`, and you will be redirected to `http://localhost:3000/dashboard`.
 
+Optional Clerk redirect env vars (match `src/lib/auth-redirect.ts` if you change the dashboard path):
+
+```bash
+NEXT_PUBLIC_CLERK_SIGN_IN_FORCE_REDIRECT_URL=/dashboard
+NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL=/dashboard
+```
+
+In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`. Google and other OAuth providers use a same-window redirect via `/sso-callback`, then land on `/dashboard`.
+
 `DATABASE_URL` is required for saved chat history. Without it, the dashboard still loads and chat works for the current session.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
