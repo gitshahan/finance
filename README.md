@@ -16,6 +16,21 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Clerk Authentication Setup
+
+This app uses Clerk for authentication and protects `/dashboard`.
+
+1. Create a Clerk app in the [Clerk Dashboard](https://dashboard.clerk.com/).
+2. Add these keys to `.env.local`:
+
+```bash
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+```
+
+3. Start the app with `npm run dev`.
+4. Visit `http://localhost:3000/login` to sign in, then open `http://localhost:3000/dashboard`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
