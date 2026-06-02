@@ -1,10 +1,14 @@
 import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { ChatInterface } from "@/components/chat-interface";
-import { loadMessagesByUser } from "@/lib/chat-store";
+import {
+  isChatPersistenceConfigured,
+  loadMessagesByUser,
+} from "@/lib/chat-store";
 
 export default async function DashboardPage() {
   const { userId } = await auth();
+  const chatPersistenceEnabled = isChatPersistenceConfigured();
   const initialMessages = userId ? await loadMessagesByUser(userId) : [];
 
   return (
@@ -20,7 +24,10 @@ export default async function DashboardPage() {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          <ChatInterface initialMessages={initialMessages} />
+          <ChatInterface
+            initialMessages={initialMessages}
+            chatPersistenceEnabled={chatPersistenceEnabled}
+          />
         </div>
       </div>
     </main>

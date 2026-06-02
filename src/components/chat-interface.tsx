@@ -10,6 +10,7 @@ import { uploadReceiptImage } from "@/lib/receipt-upload";
 
 type ChatInterfaceProps = {
   initialMessages: UIMessage[];
+  chatPersistenceEnabled?: boolean;
 };
 
 const DEFAULT_RECEIPT_PROMPT =
@@ -33,7 +34,10 @@ function shouldDeferRefocus(relatedTarget: EventTarget | null) {
   );
 }
 
-export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
+export function ChatInterface({
+  initialMessages,
+  chatPersistenceEnabled = true,
+}: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState<
@@ -246,6 +250,13 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
           ref={messagesContainerRef}
           className="h-full space-y-4 overflow-y-auto p-6"
         >
+        {!chatPersistenceEnabled ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+            Chat history is not being saved because DATABASE_URL is not
+            configured. Messages will still work for this session.
+          </div>
+        ) : null}
+
         {uploadError ? (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
             {uploadError}

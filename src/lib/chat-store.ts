@@ -4,8 +4,12 @@ import { deleteOrphanedReceiptBlobs } from "@/lib/receipt-blob";
 
 const CHAT_ID = "default";
 
+export function isChatPersistenceConfigured() {
+  return Boolean(process.env.DATABASE_URL?.trim());
+}
+
 function getDatabaseUrl() {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = process.env.DATABASE_URL?.trim();
 
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is not set");
@@ -34,6 +38,10 @@ export async function ensureChatTable() {
 }
 
 export async function loadMessagesByUser(userId: string): Promise<UIMessage[]> {
+  if (!isChatPersistenceConfigured()) {
+    return [];
+  }
+
   await ensureChatTable();
   const sql = getSqlClient();
 

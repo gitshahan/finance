@@ -30,7 +30,9 @@ DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 ```
 
-Then run `pnpm dev`, sign in, and open `http://localhost:3000/dashboard`.
+Then run `pnpm dev`, sign in at `http://localhost:3000/sign-in`, and you will be redirected to `http://localhost:3000/dashboard`.
+
+`DATABASE_URL` is required for saved chat history. Without it, the dashboard still loads and chat works for the current session.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

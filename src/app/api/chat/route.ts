@@ -5,7 +5,10 @@ import {
   streamText,
   type UIMessage,
 } from "ai";
-import { replaceMessagesByUser } from "@/lib/chat-store";
+import {
+  isChatPersistenceConfigured,
+  replaceMessagesByUser,
+} from "@/lib/chat-store";
 import { prepareMessagesForModel } from "@/lib/receipt-blob";
 import { CHAT_MODEL } from "@/lib/ai-model";
 import { RECEIPT_ASSISTANT_SYSTEM_PROMPT } from "@/lib/receipt-assistant-prompt";
@@ -51,7 +54,9 @@ export async function POST(request: Request) {
         size: 16,
       }),
       onFinish: async ({ messages: completedMessages }) => {
-        await replaceMessagesByUser(userId, completedMessages);
+        if (isChatPersistenceConfigured()) {
+          await replaceMessagesByUser(userId, completedMessages);
+        }
       },
     });
   } catch (error) {
