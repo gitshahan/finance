@@ -6,7 +6,7 @@ import { DefaultChatTransport, type FileUIPart } from "ai";
 import type { UIMessage } from "ai";
 import { ChatMessageContent } from "@/components/chat-message-content";
 import { ReceiptImageButton } from "@/components/receipt-image-button";
-import { guessImageContentType } from "@/lib/receipt-image-url";
+import { uploadReceiptImage } from "@/lib/receipt-upload";
 
 type ChatInterfaceProps = {
   initialMessages: UIMessage[];
@@ -40,10 +40,18 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
     string | null
   >(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadedReceipt, setUploadedReceipt] = useState<FileUIPart | null>(
+    null,
+  );
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | undefined>(
+    undefined,
+  );
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const didInitialScrollRef = useRef(false);
   const { messages, sendMessage, status, error } = useChat({
     messages: initialMessages,
     transport: new DefaultChatTransport({
@@ -53,7 +61,11 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
 
   const isSending = status === "submitted" || status === "streaming";
   const hasAttachment = Boolean(attachedFile);
-  const canSend = Boolean(input.trim() || hasAttachment);
+  const isAttachmentReady = !hasAttachment || Boolean(uploadedReceipt);
+  const canSend =
+    Boolean(input.trim() || hasAttachment) &&
+    isAttachmentReady &&
+    !isUploadingReceipt;
 
   function focusInput() {
     inputRef.current?.focus();
@@ -80,41 +92,46 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
   }
 
   function scrollToBottom(behavior: ScrollBehavior = "smooth") {
+    const container = messagesContainerRef.current;
+
+    if (container && behavior === "auto") {
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+
     messagesEndRef.current?.scrollIntoView({ behavior });
   }
 
   function clearAttachment() {
     setAttachedFile(null);
     setAttachmentPreviewUrl(null);
+    setUploadedReceipt(null);
+    setUploadProgress(undefined);
     setUploadError(null);
   }
 
-  async function uploadReceiptImage(file: File): Promise<FileUIPart> {
-    const formData = new FormData();
-    formData.append("file", file);
+  async function handleReceiptSelect(file: File) {
+    setAttachedFile(file);
+    setUploadedReceipt(null);
+    setUploadError(null);
+    setIsUploadingReceipt(true);
+    setUploadProgress(0);
 
-    const response = await fetch("/api/receipt-image/upload", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorMessage = (await response.text()).trim();
-      throw new Error(errorMessage || "Could not upload receipt image.");
+    try {
+      const uploaded = await uploadReceiptImage(file, setUploadProgress);
+      setUploadedReceipt(uploaded);
+    } catch (error) {
+      console.error("Receipt upload failed:", error);
+      setAttachedFile(null);
+      setUploadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to upload the receipt image right now. Please try again.",
+      );
+    } finally {
+      setIsUploadingReceipt(false);
+      setUploadProgress(undefined);
     }
-
-    const payload = (await response.json()) as { url?: string };
-
-    if (!payload.url) {
-      throw new Error("Receipt image upload did not return a URL.");
-    }
-
-    return {
-      type: "file",
-      mediaType: file.type || guessImageContentType(file.name),
-      filename: file.name,
-      url: payload.url,
-    };
   }
 
   async function sendCurrentMessage() {
@@ -124,21 +141,7 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
 
     setUploadError(null);
     const text = input.trim() || (hasAttachment ? DEFAULT_RECEIPT_PROMPT : "");
-    let files: FileUIPart[] | undefined;
-
-    if (attachedFile) {
-      try {
-        files = [await uploadReceiptImage(attachedFile)];
-      } catch (error) {
-        console.error("Receipt upload failed:", error);
-        setUploadError(
-          error instanceof Error
-            ? error.message
-            : "Unable to upload the receipt image right now. Please try again.",
-        );
-        return;
-      }
-    }
+    const files = uploadedReceipt ? [uploadedReceipt] : undefined;
 
     sendMessage({
       text,
@@ -164,6 +167,16 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
     const container = messagesContainerRef.current;
 
     if (!container) {
+      return;
+    }
+
+    if (!didInitialScrollRef.current && messages.length > 0) {
+      didInitialScrollRef.current = true;
+      scrollToBottom("auto");
+      requestAnimationFrame(() => {
+        scrollToBottom("auto");
+        updateScrollToBottomVisibility();
+      });
       return;
     }
 
@@ -317,13 +330,17 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
                 Payment receipt attached
               </p>
               <p className="text-zinc-500 dark:text-zinc-400">
-                {attachedFile?.name ?? "Image ready to send"}
+                {isUploadingReceipt
+                  ? uploadProgress !== undefined
+                    ? `Uploading… ${uploadProgress}%`
+                    : "Uploading…"
+                  : (attachedFile?.name ?? "Image ready to send")}
               </p>
             </div>
             <button
               type="button"
               onClick={clearAttachment}
-              disabled={isSending}
+              disabled={isSending || isUploadingReceipt}
               className="rounded-lg px-2 py-1 text-sm text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               Remove
@@ -334,7 +351,9 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
         <div className="flex items-center gap-3">
           <ReceiptImageButton
             disabled={isSending}
-            onSelect={setAttachedFile}
+            uploading={isUploadingReceipt}
+            progress={uploadProgress}
+            onSelect={(file) => void handleReceiptSelect(file)}
           />
           <textarea
             ref={inputRef}
@@ -356,7 +375,7 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
           <button
             type="submit"
             disabled={isSending || !canSend}
-            className="h-12 rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+            className="h-12 cursor-pointer rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
           >
             {isSending ? "Sending..." : "Send"}
           </button>

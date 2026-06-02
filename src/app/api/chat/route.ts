@@ -7,6 +7,7 @@ import {
 } from "ai";
 import { replaceMessagesByUser } from "@/lib/chat-store";
 import { prepareMessagesForModel } from "@/lib/receipt-blob";
+import { CHAT_MODEL } from "@/lib/ai-model";
 import { RECEIPT_ASSISTANT_SYSTEM_PROMPT } from "@/lib/receipt-assistant-prompt";
 
 export const maxDuration = 30;
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
     );
 
     const result = streamText({
-      model: "openai/gpt-5.5",
+      model: CHAT_MODEL,
       system: RECEIPT_ASSISTANT_SYSTEM_PROMPT,
       messages: modelMessages,
     });
