@@ -14,8 +14,17 @@ function escapeCsvCell(value: string | number | boolean | null | undefined) {
   return text;
 }
 
-function formatCsvRow(values: Array<string | number | boolean | null | undefined>) {
+export function formatCsvRow(
+  values: Array<string | number | boolean | null | undefined>,
+) {
   return values.map(escapeCsvCell).join(",");
+}
+
+export function tableToCsv(
+  headers: string[],
+  rows: Array<Array<string | number | boolean | null | undefined>>,
+) {
+  return `\uFEFF${[formatCsvRow(headers), ...rows.map(formatCsvRow)].join("\n")}`;
 }
 
 export function sharedReceiptsToCsv(receipts: SharedReceiptRecord[]) {
@@ -39,7 +48,7 @@ export function sharedReceiptsToCsv(receipts: SharedReceiptRecord[]) {
         ? receipt.details.taxAmount
         : null;
 
-    return formatCsvRow([
+    return [
       receipt.id,
       receipt.isReceipt,
       receipt.merchant,
@@ -51,10 +60,10 @@ export function sharedReceiptsToCsv(receipts: SharedReceiptRecord[]) {
       receipt.summary,
       taxAmount,
       receipt.createdAt,
-    ]);
+    ];
   });
 
-  return `\uFEFF${[formatCsvRow(headers), ...rows].join("\n")}`;
+  return tableToCsv(headers, rows);
 }
 
 export function buildReceiptCsvFilename() {

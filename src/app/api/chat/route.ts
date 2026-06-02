@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import {
   convertToModelMessages,
   createIdGenerator,
+  stepCountIs,
   streamText,
   type UIMessage,
 } from "ai";
@@ -17,6 +18,7 @@ import {
 import { syncNewReceiptsFromMessages } from "@/lib/receipt-extraction";
 import { addUserTokenUsage, getUserTokenUsage } from "@/lib/token-usage-store";
 import { CHAT_MODEL } from "@/lib/ai-model";
+import { chatTools } from "@/lib/chat-tools";
 
 export const maxDuration = 60;
 
@@ -79,6 +81,8 @@ export async function POST(request: Request) {
       model: CHAT_MODEL,
       system,
       messages: modelMessages,
+      tools: chatTools,
+      stopWhen: stepCountIs(5),
       onFinish: async ({ totalUsage }) => {
         await addUserTokenUsage(userId, {
           inputTokens: totalUsage.inputTokens,

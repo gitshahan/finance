@@ -1,7 +1,12 @@
 "use client";
 
-import type { UIMessage } from "ai";
+import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import { AssistantMessageHtml } from "@/components/assistant-message-html";
+import { ChatCsvDownload } from "@/components/chat-csv-download";
+import type {
+  CsvDownloadToolError,
+  CsvDownloadToolOutput,
+} from "@/lib/chat-csv-export";
 import {
   getReceiptImageProxyUrl,
   isLikelyReceiptBlobUrl,
@@ -21,9 +26,39 @@ function isRenderableImagePart(
   );
 }
 
+type GenerateCsvDownloadToolPart = {
+  type: string;
+  state:
+    | "input-streaming"
+    | "input-available"
+    | "output-available"
+    | "output-error";
+  output?: unknown;
+  errorText?: string;
+};
+
+function isGenerateCsvDownloadPart(
+  part: UIMessage["parts"][number],
+): part is UIMessage["parts"][number] & GenerateCsvDownloadToolPart {
+  return isToolUIPart(part) && getToolName(part) === "generateCsvDownload";
+}
+
+function isCsvDownloadOutput(
+  output: unknown,
+): output is CsvDownloadToolOutput | CsvDownloadToolError {
+  return (
+    typeof output === "object" &&
+    output !== null &&
+    ("csv" in output || "error" in output)
+  );
+}
+
 export function ChatMessageContent({ message }: ChatMessageContentProps) {
   const hasRenderableContent = message.parts.some(
-    (part) => part.type === "text" || isRenderableImagePart(part),
+    (part) =>
+      part.type === "text" ||
+      isRenderableImagePart(part) ||
+      isGenerateCsvDownloadPart(part),
   );
 
   if (!hasRenderableContent) {
@@ -66,6 +101,44 @@ export function ChatMessageContent({ message }: ChatMessageContentProps) {
               className="max-h-64 w-full rounded-lg border border-zinc-200 object-contain dark:border-zinc-700"
             />
           );
+        }
+
+        if (isGenerateCsvDownloadPart(part)) {
+          if (part.state === "input-available") {
+            return (
+              <p
+                key={`${message.id}-csv-${index}`}
+                className="text-sm text-zinc-600 dark:text-zinc-400"
+              >
+                Preparing CSV download…
+              </p>
+            );
+          }
+
+          if (part.state === "output-error") {
+            return (
+              <p
+                key={`${message.id}-csv-${index}`}
+                className="text-sm text-red-700 dark:text-red-300"
+              >
+                {part.errorText ?? "Could not create the CSV file."}
+              </p>
+            );
+          }
+
+          if (
+            part.state === "output-available" &&
+            isCsvDownloadOutput(part.output)
+          ) {
+            return (
+              <ChatCsvDownload
+                key={`${message.id}-csv-${index}`}
+                output={part.output}
+              />
+            );
+          }
+
+          return null;
         }
 
         return null;
