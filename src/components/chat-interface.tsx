@@ -6,7 +6,6 @@ import { DefaultChatTransport, type FileUIPart } from "ai";
 import type { UIMessage } from "ai";
 import { ChatMessageContent } from "@/components/chat-message-content";
 import { ReceiptImageButton } from "@/components/receipt-image-button";
-import { useReceiptExport } from "@/contexts/receipt-export-context";
 import { isCsvFile } from "@/lib/receipt-image-url";
 import { uploadReceiptImage } from "@/lib/receipt-upload";
 import type { UserTokenUsage } from "@/lib/token-usage-store";
@@ -46,7 +45,6 @@ export function ChatInterface({
   chatPersistenceEnabled = true,
   initialTokenUsage,
 }: ChatInterfaceProps) {
-  const { exportAllowed, isExporting, downloadCsv } = useReceiptExport();
   const [input, setInput] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -441,17 +439,7 @@ export function ChatInterface({
             progress={uploadProgress}
             onSelect={(file) => void handleReceiptSelect(file)}
           />
-          <div className="relative min-w-0 flex-1">
-            {exportAllowed ? (
-              <button
-                type="button"
-                onClick={() => void downloadCsv()}
-                disabled={isExporting}
-                className="absolute bottom-[calc(100%+0.5rem)] right-0 z-10 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 shadow-md transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-              >
-                {isExporting ? "Exporting…" : "Export to CSV"}
-              </button>
-            ) : null}
+          <div className="min-w-0 flex-1">
             <textarea
               ref={inputRef}
               autoFocus

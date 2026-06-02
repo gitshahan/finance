@@ -6,7 +6,6 @@ import {
   isChatPersistenceConfigured,
   loadMessagesByUser,
 } from "@/lib/chat-store";
-import { isSharedDataConfigured } from "@/lib/shared-data-store";
 import {
   getUserTokenUsage,
   type UserTokenUsage,
@@ -15,7 +14,6 @@ import {
 export default async function DashboardPage() {
   const { userId } = await auth();
   let chatPersistenceEnabled = isChatPersistenceConfigured();
-  const sharedDataEnabled = isSharedDataConfigured();
   let initialMessages: UIMessage[] = [];
   let tokenUsage: UserTokenUsage | null = null;
 
@@ -52,7 +50,6 @@ export default async function DashboardPage() {
         <DashboardShell
           initialMessages={initialMessages}
           chatPersistenceEnabled={chatPersistenceEnabled}
-          sharedDataEnabled={sharedDataEnabled}
           tokenUsage={tokenUsage}
         />
       </div>
