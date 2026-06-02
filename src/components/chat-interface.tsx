@@ -18,7 +18,7 @@ function getMessageText(message: UIMessage) {
 
 export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     messages: initialMessages,
     transport: new DefaultChatTransport({
       api: "/api/chat",
@@ -30,6 +30,13 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
   return (
     <section className="flex h-full min-h-0 flex-col rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex-1 space-y-4 overflow-y-auto p-6">
+        {error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+            {error.message ||
+              "Could not get a reply. Please check your configuration and try again."}
+          </div>
+        ) : null}
+
         {messages.length === 0 ? (
           <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
             Ask anything about your finances to get started.
