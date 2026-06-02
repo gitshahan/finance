@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
+import { FileShareButton } from "@/components/file-share-button";
 
 type ChatInterfaceProps = {
   initialMessages: UIMessage[];
@@ -81,7 +82,8 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
           setInput("");
         }}
       >
-        <div className="flex items-end gap-3">
+        <div className="flex items-center gap-3">
+          <FileShareButton />
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -99,7 +101,7 @@ export function ChatInterface({ initialMessages }: ChatInterfaceProps) {
               }
             }}
             placeholder="Message your finance assistant..."
-            className="max-h-40 min-h-12 flex-1 resize-y rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950"
+            className="max-h-40 min-h-12 flex-1 resize-y rounded-xl border border-zinc-300 bg-white px-3 py-3 text-sm outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950"
             disabled={isSending}
           />
           <button

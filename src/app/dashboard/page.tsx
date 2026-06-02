@@ -15,9 +15,6 @@ export default async function DashboardPage() {
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Finance Chat
             </h1>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              Your conversation is saved to Neon.
-            </p>
           </div>
           <UserButton />
         </header>
