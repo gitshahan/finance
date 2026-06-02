@@ -2,6 +2,15 @@ import { getSqlClient, isDatabaseConfigured } from "@/lib/db";
 
 const MAX_TOTAL_TOKENS = 1_000_000;
 const MAX_OUTPUT_TOKENS = 286_000;
+const MAX_REQUEST_COUNT = 550;
+
+function percentRemaining(remaining: number, max: number) {
+  if (max <= 0) {
+    return 100;
+  }
+
+  return Math.min(100, Math.max(0, Math.round((remaining / max) * 100)));
+}
 
 export type UserTokenUsage = {
   userId: string;
@@ -14,6 +23,8 @@ export type UserTokenUsage = {
   remainingTotalTokens: number;
   remainingOutputTokens: number;
   remainingRequestsEstimate: number;
+  /** Lowest remaining % across token and request limits. */
+  remainingQuotaPercent: number;
   isQuotaExceeded: boolean;
 };
 
@@ -54,7 +65,12 @@ function buildUsageSummary(
   const requestCount = row ? Number.parseInt(row.request_count, 10) || 0 : 0;
   const remainingTotalTokens = Math.max(0, MAX_TOTAL_TOKENS - totalTokens);
   const remainingOutputTokens = Math.max(0, MAX_OUTPUT_TOKENS - totalOutputTokens);
-  const remainingRequestsEstimate = Math.max(0, 550 - requestCount);
+  const remainingRequestsEstimate = Math.max(0, MAX_REQUEST_COUNT - requestCount);
+  const remainingQuotaPercent = Math.min(
+    percentRemaining(remainingTotalTokens, MAX_TOTAL_TOKENS),
+    percentRemaining(remainingOutputTokens, MAX_OUTPUT_TOKENS),
+    percentRemaining(remainingRequestsEstimate, MAX_REQUEST_COUNT),
+  );
   const isQuotaExceeded =
     totalTokens >= MAX_TOTAL_TOKENS || totalOutputTokens >= MAX_OUTPUT_TOKENS;
 
@@ -69,6 +85,7 @@ function buildUsageSummary(
     remainingTotalTokens,
     remainingOutputTokens,
     remainingRequestsEstimate,
+    remainingQuotaPercent,
     isQuotaExceeded,
   };
 }

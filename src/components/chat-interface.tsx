@@ -13,7 +13,8 @@ import type { UserTokenUsage } from "@/lib/token-usage-store";
 type ChatInterfaceProps = {
   initialMessages: UIMessage[];
   chatPersistenceEnabled?: boolean;
-  initialTokenUsage: UserTokenUsage | null;
+  tokenUsage: UserTokenUsage | null;
+  onTokenUsageChange: (usage: UserTokenUsage) => void;
 };
 
 const DEFAULT_RECEIPT_IMAGE_PROMPT =
@@ -43,7 +44,8 @@ function shouldDeferRefocus(relatedTarget: EventTarget | null) {
 export function ChatInterface({
   initialMessages,
   chatPersistenceEnabled = true,
-  initialTokenUsage,
+  tokenUsage,
+  onTokenUsageChange,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -54,9 +56,6 @@ export function ChatInterface({
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | undefined>(
     undefined,
-  );
-  const [tokenUsage, setTokenUsage] = useState<UserTokenUsage | null>(
-    initialTokenUsage,
   );
   const attachmentIsCsv = attachedFile ? isCsvFile(attachedFile) : false;
   const attachmentPreviewUrl = useMemo(() => {
@@ -77,6 +76,7 @@ export function ChatInterface({
       api: "/api/chat",
     }),
   });
+  const prevStatusRef = useRef(status);
 
   const isSending = status === "submitted" || status === "streaming";
   const hasAttachment = Boolean(attachedFile);
@@ -187,7 +187,7 @@ export function ChatInterface({
         try {
           const data = await maybeResponseError.response.json();
           if (data.usage) {
-            setTokenUsage(data.usage);
+            onTokenUsageChange(data.usage);
           }
         } catch (jsonError) {
           console.error("Failed to parse quota response:", jsonError);
@@ -201,6 +201,34 @@ export function ChatInterface({
     clearAttachment();
     requestAnimationFrame(() => focusInput());
   }
+
+  useEffect(() => {
+    const wasBusy =
+      prevStatusRef.current === "submitted" ||
+      prevStatusRef.current === "streaming";
+    const isReady = status === "ready";
+
+    if (wasBusy && isReady) {
+      void fetch("/api/token-usage")
+        .then((response) => {
+          if (!response.ok) {
+            return null;
+          }
+
+          return response.json() as Promise<{ usage?: UserTokenUsage }>;
+        })
+        .then((data) => {
+          if (data?.usage) {
+            onTokenUsageChange(data.usage);
+          }
+        })
+        .catch((fetchError) => {
+          console.error("Failed to refresh token usage:", fetchError);
+        });
+    }
+
+    prevStatusRef.current = status;
+  }, [status, onTokenUsageChange]);
 
   useEffect(() => {
     focusInput();
@@ -296,27 +324,12 @@ export function ChatInterface({
           </div>
         ) : null}
 
-        {tokenUsage ? (
-          <div
-            className={`rounded-lg border p-3 text-sm ${
-              tokenUsage.isQuotaExceeded
-                ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
-                : "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
-            }`}
-          >
-            {tokenUsage.isQuotaExceeded ? (
-              <p className="font-medium">
-                Usage limit reached for this account. Please contact support to
-                extend your quota.
-              </p>
-            ) : (
-              <p>
-                Remaining budget: {tokenUsage.remainingRequestsEstimate} requests
-                (est), {tokenUsage.remainingTotalTokens.toLocaleString()} total
-                tokens, {tokenUsage.remainingOutputTokens.toLocaleString()} output
-                tokens.
-              </p>
-            )}
+        {tokenUsage?.isQuotaExceeded ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+            <p className="font-medium">
+              Usage limit reached for this account. Please contact support to
+              extend your quota.
+            </p>
           </div>
         ) : null}
 
