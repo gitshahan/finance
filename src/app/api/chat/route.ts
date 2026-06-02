@@ -10,7 +10,10 @@ import {
   replaceMessagesByUser,
 } from "@/lib/chat-store";
 import { buildChatSystemPrompt } from "@/lib/chat-context";
-import { prepareMessagesForModel } from "@/lib/receipt-blob";
+import {
+  messagesOnlyUseOwnedReceiptBlobs,
+  prepareMessagesForModel,
+} from "@/lib/receipt-blob";
 import { syncNewReceiptsFromMessages } from "@/lib/receipt-extraction";
 import { addUserTokenUsage, getUserTokenUsage } from "@/lib/token-usage-store";
 import { CHAT_MODEL } from "@/lib/ai-model";
@@ -19,6 +22,7 @@ export const maxDuration = 60;
 
 type ChatRequestBody = {
   messages: UIMessage[];
+  userId?: string;
 };
 
 export async function POST(request: Request) {
@@ -38,7 +42,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const { messages }: ChatRequestBody = await request.json();
+    const body = (await request.json()) as ChatRequestBody;
+
+    if (body.userId && body.userId !== userId) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    const { messages } = body;
+
+    if (!messagesOnlyUseOwnedReceiptBlobs(userId, messages)) {
+      return new Response("Forbidden", { status: 403 });
+    }
     const usage = await getUserTokenUsage(userId);
 
     if (usage.isQuotaExceeded) {
@@ -65,6 +79,13 @@ export async function POST(request: Request) {
       model: CHAT_MODEL,
       system,
       messages: modelMessages,
+      onFinish: async ({ totalUsage }) => {
+        await addUserTokenUsage(userId, {
+          inputTokens: totalUsage.inputTokens,
+          outputTokens: totalUsage.outputTokens,
+          totalTokens: totalUsage.totalTokens,
+        });
+      },
     });
 
     return result.toUIMessageStreamResponse({
@@ -73,13 +94,7 @@ export async function POST(request: Request) {
         prefix: "msg",
         size: 16,
       }),
-      onFinish: async ({ messages: completedMessages, totalUsage }) => {
-        await addUserTokenUsage(userId, {
-          inputTokens: totalUsage.inputTokens,
-          outputTokens: totalUsage.outputTokens,
-          totalTokens: totalUsage.totalTokens,
-        });
-
+      onFinish: async ({ messages: completedMessages }) => {
         if (isChatPersistenceConfigured()) {
           await syncNewReceiptsFromMessages(userId, completedMessages);
           await replaceMessagesByUser(userId, completedMessages);

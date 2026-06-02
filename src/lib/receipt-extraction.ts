@@ -6,6 +6,7 @@ import {
   extractReceiptBlobUrls,
   fetchReceiptBlobAsDataUrl,
 } from "@/lib/receipt-blob";
+import { isCsvFilename } from "@/lib/receipt-image-url";
 import {
   getSharedReceiptByImageUrl,
   insertSharedReceipt,
@@ -39,6 +40,14 @@ const receiptExtractionSchema = z.object({
 });
 
 type ReceiptExtraction = z.infer<typeof receiptExtractionSchema>;
+
+function isCsvBlobUrl(url: string) {
+  try {
+    return isCsvFilename(new URL(url).pathname);
+  } catch {
+    return isCsvFilename(url);
+  }
+}
 
 function findMessageIdForImageUrl(
   messages: UIMessage[],
@@ -130,6 +139,10 @@ export async function syncNewReceiptsFromMessages(
   const imageUrls = extractReceiptBlobUrls(messages, userId);
 
   for (const imageUrl of imageUrls) {
+    if (isCsvBlobUrl(imageUrl)) {
+      continue;
+    }
+
     const existing = await getSharedReceiptByImageUrl(userId, imageUrl);
 
     if (existing) {

@@ -36,6 +36,34 @@ export function isImageFile(file: File) {
   return extension ? IMAGE_EXTENSIONS.has(extension) : false;
 }
 
+export function isCsvFile(file: File) {
+  if (
+    file.type === "text/csv" ||
+    file.type === "application/csv" ||
+    file.type === "application/vnd.ms-excel"
+  ) {
+    return true;
+  }
+
+  return file.name.split(".").pop()?.toLowerCase() === "csv";
+}
+
+export function isSupportedReceiptUpload(file: File) {
+  return isImageFile(file) || isCsvFile(file);
+}
+
+export function isCsvFilename(filename: string) {
+  return filename.split(".").pop()?.toLowerCase() === "csv";
+}
+
+export function guessReceiptUploadContentType(filename: string) {
+  if (isCsvFilename(filename)) {
+    return "text/csv";
+  }
+
+  return guessImageContentType(filename);
+}
+
 export function isLikelyReceiptBlobUrl(url: string) {
   if (url.startsWith("/api/receipt-image")) {
     return true;

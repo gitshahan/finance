@@ -1,5 +1,5 @@
 import type { FileUIPart } from "ai";
-import { guessImageContentType } from "@/lib/receipt-image-url";
+import { guessReceiptUploadContentType } from "@/lib/receipt-image-url";
 
 export function uploadReceiptImage(
   file: File,
@@ -19,7 +19,7 @@ export function uploadReceiptImage(
     xhr.addEventListener("load", () => {
       if (xhr.status < 200 || xhr.status >= 300) {
         const message = xhr.responseText.trim();
-        reject(new Error(message || "Could not upload receipt image."));
+        reject(new Error(message || "Could not upload receipt file."));
         return;
       }
 
@@ -27,27 +27,27 @@ export function uploadReceiptImage(
         const payload = JSON.parse(xhr.responseText) as { url?: string };
 
         if (!payload.url) {
-          reject(new Error("Receipt image upload did not return a URL."));
+          reject(new Error("Receipt upload did not return a URL."));
           return;
         }
 
         resolve({
           type: "file",
-          mediaType: file.type || guessImageContentType(file.name),
+          mediaType: file.type || guessReceiptUploadContentType(file.name),
           filename: file.name,
           url: payload.url,
         });
       } catch {
-        reject(new Error("Could not parse receipt image upload response."));
+        reject(new Error("Could not parse receipt upload response."));
       }
     });
 
     xhr.addEventListener("error", () => {
-      reject(new Error("Unable to upload the receipt image right now."));
+      reject(new Error("Unable to upload the receipt file right now."));
     });
 
     xhr.addEventListener("abort", () => {
-      reject(new Error("Receipt image upload was cancelled."));
+      reject(new Error("Receipt upload was cancelled."));
     });
 
     xhr.open("POST", "/api/receipt-image/upload");

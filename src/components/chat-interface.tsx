@@ -7,6 +7,7 @@ import type { UIMessage } from "ai";
 import { ChatMessageContent } from "@/components/chat-message-content";
 import { ReceiptImageButton } from "@/components/receipt-image-button";
 import { useReceiptExport } from "@/contexts/receipt-export-context";
+import { isCsvFile } from "@/lib/receipt-image-url";
 import { uploadReceiptImage } from "@/lib/receipt-upload";
 import type { UserTokenUsage } from "@/lib/token-usage-store";
 
@@ -16,8 +17,11 @@ type ChatInterfaceProps = {
   initialTokenUsage: UserTokenUsage | null;
 };
 
-const DEFAULT_RECEIPT_PROMPT =
+const DEFAULT_RECEIPT_IMAGE_PROMPT =
   "Please analyze this payment receipt and summarize the key details.";
+
+const DEFAULT_RECEIPT_CSV_PROMPT =
+  "Please analyze this CSV file of receipt data and summarize the key details.";
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
@@ -56,8 +60,9 @@ export function ChatInterface({
   const [tokenUsage, setTokenUsage] = useState<UserTokenUsage | null>(
     initialTokenUsage,
   );
+  const attachmentIsCsv = attachedFile ? isCsvFile(attachedFile) : false;
   const attachmentPreviewUrl = useMemo(() => {
-    if (!attachedFile) {
+    if (!attachedFile || isCsvFile(attachedFile)) {
       return null;
     }
 
@@ -141,7 +146,7 @@ export function ChatInterface({
       setUploadError(
         error instanceof Error
           ? error.message
-          : "Unable to upload the receipt image right now. Please try again.",
+          : "Unable to upload the receipt file right now. Please try again.",
       );
     } finally {
       setIsUploadingReceipt(false);
@@ -155,7 +160,13 @@ export function ChatInterface({
     }
 
     setUploadError(null);
-    const text = input.trim() || (hasAttachment ? DEFAULT_RECEIPT_PROMPT : "");
+    const text =
+      input.trim() ||
+      (hasAttachment
+        ? attachmentIsCsv
+          ? DEFAULT_RECEIPT_CSV_PROMPT
+          : DEFAULT_RECEIPT_IMAGE_PROMPT
+        : "");
     const files = uploadedReceipt ? [uploadedReceipt] : undefined;
 
     try {
@@ -326,7 +337,7 @@ export function ChatInterface({
 
         {messages.length === 0 ? (
           <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            Attach a payment receipt image to scan and save it. You can ask about
+            Attach a payment receipt image or CSV to analyze it. You can ask about
             receipts in this chat or ones you shared earlier.
           </div>
         ) : null}
@@ -383,23 +394,33 @@ export function ChatInterface({
           void sendCurrentMessage();
         }}
       >
-        {attachmentPreviewUrl ? (
+        {hasAttachment ? (
           <div className="mb-3 flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-950">
-            <img
-              src={attachmentPreviewUrl}
-              alt="Receipt preview"
-              className="h-20 w-20 rounded-lg border border-zinc-200 object-cover dark:border-zinc-700"
-            />
+            {attachmentPreviewUrl ? (
+              <img
+                src={attachmentPreviewUrl}
+                alt="Receipt preview"
+                className="h-20 w-20 rounded-lg border border-zinc-200 object-cover dark:border-zinc-700"
+              />
+            ) : (
+              <div
+                className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white text-xs font-semibold uppercase text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                aria-hidden="true"
+              >
+                CSV
+              </div>
+            )}
             <div className="min-w-0 flex-1 text-sm">
               <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                Payment receipt attached
+                {attachmentIsCsv ? "CSV file attached" : "Payment receipt attached"}
               </p>
               <p className="text-zinc-500 dark:text-zinc-400">
                 {isUploadingReceipt
                   ? uploadProgress !== undefined
                     ? `Uploading… ${uploadProgress}%`
                     : "Uploading…"
-                  : (attachedFile?.name ?? "Image ready to send")}
+                  : (attachedFile?.name ??
+                    (attachmentIsCsv ? "CSV ready to send" : "Image ready to send"))}
               </p>
             </div>
             <button

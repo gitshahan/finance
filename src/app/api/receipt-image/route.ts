@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { get } from "@vercel/blob";
 import { userOwnsReceiptBlobUrl } from "@/lib/receipt-blob";
-import { guessImageContentType } from "@/lib/receipt-image-url";
+import { guessReceiptUploadContentType } from "@/lib/receipt-image-url";
 
 export async function GET(request: Request) {
   try {
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     return new Response(result.stream, {
       headers: {
         "Content-Type":
-          result.blob.contentType ?? guessImageContentType(blobUrl),
+          result.blob.contentType ?? guessReceiptUploadContentType(blobUrl),
         "Cache-Control": "private, max-age=3600",
       },
     });

@@ -1,11 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { put } from "@vercel/blob";
 import { getReceiptBlobPathPrefix } from "@/lib/receipt-blob";
-import { guessImageContentType, isImageFile } from "@/lib/receipt-image-url";
+import {
+  guessReceiptUploadContentType,
+  isSupportedReceiptUpload,
+} from "@/lib/receipt-image-url";
 
 export const maxDuration = 30;
 
-const MAX_RECEIPT_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_RECEIPT_UPLOAD_BYTES = 1 * 1024 * 1024;
 
 export async function POST(request: Request) {
   try {
@@ -26,19 +29,22 @@ export async function POST(request: Request) {
     const file = formData.get("file");
 
     if (!(file instanceof File)) {
-      return new Response("No image file provided.", { status: 400 });
+      return new Response("No file provided.", { status: 400 });
     }
 
-    if (!isImageFile(file)) {
-      return new Response("Only image files are supported.", { status: 400 });
+    if (!isSupportedReceiptUpload(file)) {
+      return new Response(
+        "Only image files (JPEG, PNG, WebP, etc.) and CSV files are supported.",
+        { status: 400 },
+      );
     }
 
-    if (file.size > MAX_RECEIPT_IMAGE_BYTES) {
-      return new Response("Image exceeds 8MB limit.", { status: 400 });
+    if (file.size > MAX_RECEIPT_UPLOAD_BYTES) {
+      return new Response("File exceeds 1MB limit.", { status: 400 });
     }
 
-    const contentType = file.type || guessImageContentType(file.name);
-    const fileExtension = file.name.split(".").pop() || "jpg";
+    const contentType = file.type || guessReceiptUploadContentType(file.name);
+    const fileExtension = file.name.split(".").pop() || "bin";
     const blobPath = `${getReceiptBlobPathPrefix(userId)}${crypto.randomUUID()}.${fileExtension}`;
 
     const uploaded = await put(blobPath, file, {
@@ -52,7 +58,7 @@ export async function POST(request: Request) {
       pathname: uploaded.pathname,
     });
   } catch (error) {
-    console.error("Receipt image upload failed:", error);
-    return new Response("Unable to upload image right now.", { status: 500 });
+    console.error("Receipt upload failed:", error);
+    return new Response("Unable to upload file right now.", { status: 500 });
   }
 }

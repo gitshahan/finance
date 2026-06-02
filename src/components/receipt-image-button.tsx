@@ -20,9 +20,9 @@ export function ReceiptImageButton({
   const isDisabled = disabled || uploading;
   const progressLabel =
     uploading && progress !== undefined
-      ? `Uploading receipt image, ${progress} percent`
+      ? `Uploading receipt file, ${progress} percent`
       : uploading
-        ? "Uploading receipt image"
+        ? "Uploading receipt file"
         : undefined;
 
   return (
@@ -30,7 +30,7 @@ export function ReceiptImageButton({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.csv,text/csv"
         capture="environment"
         className="hidden"
         disabled={isDisabled}
@@ -51,11 +51,15 @@ export function ReceiptImageButton({
         onClick={() => fileInputRef.current?.click()}
         disabled={isDisabled}
         aria-label={
-          uploading ? "Uploading payment receipt image" : "Attach payment receipt image"
+          uploading
+            ? "Uploading payment receipt"
+            : "Attach payment receipt image or CSV"
         }
         aria-busy={uploading}
         title={
-          uploading ? "Uploading payment receipt image…" : "Attach payment receipt image"
+          uploading
+            ? "Uploading payment receipt…"
+            : "Attach payment receipt image or CSV"
         }
         className="relative flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-zinc-300 bg-white text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
       >
