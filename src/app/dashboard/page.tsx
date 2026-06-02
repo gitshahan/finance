@@ -8,9 +8,9 @@ export default async function DashboardPage() {
   const initialMessages = userId ? await loadMessagesByUser(userId) : [];
 
   return (
-    <main className="flex flex-1 bg-zinc-50 p-4 dark:bg-black sm:p-6">
-      <div className="mx-auto flex w-full max-w-4xl flex-1 min-h-0 flex-col gap-4">
-        <header className="flex items-center justify-between">
+    <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 p-4 dark:bg-black sm:p-6">
+      <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-4 overflow-hidden">
+        <header className="flex shrink-0 items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
               Finance Chat
@@ -19,7 +19,7 @@ export default async function DashboardPage() {
           <UserButton />
         </header>
 
-        <div className="flex-1 min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col">
           <ChatInterface initialMessages={initialMessages} />
         </div>
       </div>

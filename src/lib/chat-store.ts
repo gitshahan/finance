@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import type { UIMessage } from "ai";
+import { deleteOrphanedReceiptBlobs } from "@/lib/receipt-blob";
 
 const CHAT_ID = "default";
 
@@ -53,6 +54,7 @@ export async function replaceMessagesByUser(
 ) {
   await ensureChatTable();
   const sql = getSqlClient();
+  const previousMessages = await loadMessagesByUser(userId);
 
   await sql`BEGIN`;
 
@@ -81,4 +83,6 @@ export async function replaceMessagesByUser(
     await sql`ROLLBACK`;
     throw error;
   }
+
+  await deleteOrphanedReceiptBlobs(userId, previousMessages, messages);
 }

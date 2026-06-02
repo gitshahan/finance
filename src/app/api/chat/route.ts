@@ -6,6 +6,8 @@ import {
   type UIMessage,
 } from "ai";
 import { replaceMessagesByUser } from "@/lib/chat-store";
+import { prepareMessagesForModel } from "@/lib/receipt-blob";
+import { RECEIPT_ASSISTANT_SYSTEM_PROMPT } from "@/lib/receipt-assistant-prompt";
 
 export const maxDuration = 30;
 
@@ -31,12 +33,14 @@ export async function POST(request: Request) {
     }
 
     const { messages }: ChatRequestBody = await request.json();
+    const modelMessages = await convertToModelMessages(
+      await prepareMessagesForModel(userId, messages),
+    );
 
     const result = streamText({
       model: "openai/gpt-5.5",
-      system:
-        "You are a helpful finance assistant. Give practical and concise answers.",
-      messages: await convertToModelMessages(messages),
+      system: RECEIPT_ASSISTANT_SYSTEM_PROMPT,
+      messages: modelMessages,
     });
 
     return result.toUIMessageStreamResponse({
