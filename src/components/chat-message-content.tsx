@@ -14,6 +14,7 @@ import {
 
 type ChatMessageContentProps = {
   message: UIMessage;
+  isLoading?: boolean;
 };
 
 function isRenderableImagePart(
@@ -53,16 +54,23 @@ function isCsvDownloadOutput(
   );
 }
 
-export function ChatMessageContent({ message }: ChatMessageContentProps) {
+export function ChatMessageContent({
+  message,
+  isLoading = false,
+}: ChatMessageContentProps) {
   const hasRenderableContent = message.parts.some(
     (part) =>
-      part.type === "text" ||
+      (part.type === "text" && part.text) ||
       isRenderableImagePart(part) ||
       isGenerateCsvDownloadPart(part),
   );
 
   if (!hasRenderableContent) {
-    return <>…</>;
+    return (
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        {isLoading ? "Working on your request…" : "…"}
+      </p>
+    );
   }
 
   return (
@@ -104,7 +112,10 @@ export function ChatMessageContent({ message }: ChatMessageContentProps) {
         }
 
         if (isGenerateCsvDownloadPart(part)) {
-          if (part.state === "input-available") {
+          if (
+            part.state === "input-streaming" ||
+            part.state === "input-available"
+          ) {
             return (
               <p
                 key={`${message.id}-csv-${index}`}

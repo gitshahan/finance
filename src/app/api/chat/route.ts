@@ -18,7 +18,7 @@ import {
 import { syncNewReceiptsFromMessages } from "@/lib/receipt-extraction";
 import { addUserTokenUsage, getUserTokenUsage } from "@/lib/token-usage-store";
 import { CHAT_MODEL } from "@/lib/ai-model";
-import { chatTools } from "@/lib/chat-tools";
+import { createChatTools } from "@/lib/chat-tools";
 
 export const maxDuration = 60;
 
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
       model: CHAT_MODEL,
       system,
       messages: modelMessages,
-      tools: chatTools,
+      tools: createChatTools({ userId, messages }),
       stopWhen: stepCountIs(5),
       onFinish: async ({ totalUsage }) => {
         await addUserTokenUsage(userId, {

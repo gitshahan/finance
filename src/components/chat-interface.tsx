@@ -353,24 +353,35 @@ export function ChatInterface({
           </div>
         ) : null}
 
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${
-              message.role === "user" ? "justify-end" : "justify-start"
-            }`}
-          >
+        {messages.map((message, messageIndex) => {
+          const isLastMessage = messageIndex === messages.length - 1;
+          const isAssistantLoading =
+            isSending &&
+            isLastMessage &&
+            message.role === "assistant";
+
+          return (
             <div
-              className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
-                message.role === "user"
-                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                  : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+              key={message.id}
+              className={`flex ${
+                message.role === "user" ? "justify-end" : "justify-start"
               }`}
             >
-              <ChatMessageContent message={message} />
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
+                  message.role === "user"
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                    : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+                }`}
+              >
+                <ChatMessageContent
+                  message={message}
+                  isLoading={isAssistantLoading}
+                />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
         </div>
 
