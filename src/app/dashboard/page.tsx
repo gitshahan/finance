@@ -1,15 +1,41 @@
 import { UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
-import { ChatInterface } from "@/components/chat-interface";
+import type { UIMessage } from "ai";
+import { DashboardShell } from "@/components/dashboard-shell";
 import {
   isChatPersistenceConfigured,
   loadMessagesByUser,
 } from "@/lib/chat-store";
+import { isSharedDataConfigured } from "@/lib/shared-data-store";
+import {
+  getUserTokenUsage,
+  type UserTokenUsage,
+} from "@/lib/token-usage-store";
 
 export default async function DashboardPage() {
   const { userId } = await auth();
-  const chatPersistenceEnabled = isChatPersistenceConfigured();
-  const initialMessages = userId ? await loadMessagesByUser(userId) : [];
+  let chatPersistenceEnabled = isChatPersistenceConfigured();
+  const sharedDataEnabled = isSharedDataConfigured();
+  let initialMessages: UIMessage[] = [];
+  let tokenUsage: UserTokenUsage | null = null;
+
+  if (userId && chatPersistenceEnabled) {
+    try {
+      initialMessages = await loadMessagesByUser(userId);
+    } catch (error) {
+      // Keep the dashboard usable even when persistence is misconfigured or unavailable.
+      chatPersistenceEnabled = false;
+      console.error("Failed to load persisted chat messages:", error);
+    }
+  }
+
+  if (userId) {
+    try {
+      tokenUsage = await getUserTokenUsage(userId);
+    } catch (error) {
+      console.error("Failed to load user token usage:", error);
+    }
+  }
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 p-4 dark:bg-black sm:p-6">
@@ -23,12 +49,12 @@ export default async function DashboardPage() {
           <UserButton />
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col">
-          <ChatInterface
-            initialMessages={initialMessages}
-            chatPersistenceEnabled={chatPersistenceEnabled}
-          />
-        </div>
+        <DashboardShell
+          initialMessages={initialMessages}
+          chatPersistenceEnabled={chatPersistenceEnabled}
+          sharedDataEnabled={sharedDataEnabled}
+          tokenUsage={tokenUsage}
+        />
       </div>
     </main>
   );

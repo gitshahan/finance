@@ -9,11 +9,13 @@ import {
   isChatPersistenceConfigured,
   replaceMessagesByUser,
 } from "@/lib/chat-store";
+import { buildChatSystemPrompt } from "@/lib/chat-context";
 import { prepareMessagesForModel } from "@/lib/receipt-blob";
+import { syncNewReceiptsFromMessages } from "@/lib/receipt-extraction";
+import { addUserTokenUsage, getUserTokenUsage } from "@/lib/token-usage-store";
 import { CHAT_MODEL } from "@/lib/ai-model";
-import { RECEIPT_ASSISTANT_SYSTEM_PROMPT } from "@/lib/receipt-assistant-prompt";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 type ChatRequestBody = {
   messages: UIMessage[];
@@ -37,13 +39,31 @@ export async function POST(request: Request) {
     }
 
     const { messages }: ChatRequestBody = await request.json();
+    const usage = await getUserTokenUsage(userId);
+
+    if (usage.isQuotaExceeded) {
+      return Response.json(
+        {
+          error:
+            "Usage limit reached. You have used your allocated token budget for this account.",
+          usage,
+        },
+        { status: 429 },
+      );
+    }
+
+    if (isChatPersistenceConfigured()) {
+      await syncNewReceiptsFromMessages(userId, messages);
+    }
+
+    const system = await buildChatSystemPrompt(userId);
     const modelMessages = await convertToModelMessages(
       await prepareMessagesForModel(userId, messages),
     );
 
     const result = streamText({
       model: CHAT_MODEL,
-      system: RECEIPT_ASSISTANT_SYSTEM_PROMPT,
+      system,
       messages: modelMessages,
     });
 
@@ -53,8 +73,15 @@ export async function POST(request: Request) {
         prefix: "msg",
         size: 16,
       }),
-      onFinish: async ({ messages: completedMessages }) => {
+      onFinish: async ({ messages: completedMessages, totalUsage }) => {
+        await addUserTokenUsage(userId, {
+          inputTokens: totalUsage.inputTokens,
+          outputTokens: totalUsage.outputTokens,
+          totalTokens: totalUsage.totalTokens,
+        });
+
         if (isChatPersistenceConfigured()) {
+          await syncNewReceiptsFromMessages(userId, completedMessages);
           await replaceMessagesByUser(userId, completedMessages);
         }
       },

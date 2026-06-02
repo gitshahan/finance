@@ -1,25 +1,15 @@
-import { neon } from "@neondatabase/serverless";
 import type { UIMessage } from "ai";
-import { deleteOrphanedReceiptBlobs } from "@/lib/receipt-blob";
+import { getSqlClient, isDatabaseConfigured } from "@/lib/db";
+import {
+  deleteOrphanedReceiptBlobs,
+  extractReceiptBlobUrls,
+} from "@/lib/receipt-blob";
+import { deleteSharedReceiptsByImageUrls } from "@/lib/shared-data-store";
 
 const CHAT_ID = "default";
 
 export function isChatPersistenceConfigured() {
-  return Boolean(process.env.DATABASE_URL?.trim());
-}
-
-function getDatabaseUrl() {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
-
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is not set");
-  }
-
-  return databaseUrl;
-}
-
-function getSqlClient() {
-  return neon(getDatabaseUrl());
+  return isDatabaseConfigured();
 }
 
 export async function ensureChatTable() {
@@ -92,5 +82,10 @@ export async function replaceMessagesByUser(
     throw error;
   }
 
+  const previousUrls = new Set(extractReceiptBlobUrls(previousMessages, userId));
+  const nextUrls = new Set(extractReceiptBlobUrls(messages, userId));
+  const orphanedUrls = [...previousUrls].filter((url) => !nextUrls.has(url));
+
   await deleteOrphanedReceiptBlobs(userId, previousMessages, messages);
+  await deleteSharedReceiptsByImageUrls(userId, orphanedUrls);
 }

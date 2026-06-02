@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type FileUIPart } from "ai";
 import type { UIMessage } from "ai";
 import { ChatMessageContent } from "@/components/chat-message-content";
 import { ReceiptImageButton } from "@/components/receipt-image-button";
+import { useReceiptExport } from "@/contexts/receipt-export-context";
 import { uploadReceiptImage } from "@/lib/receipt-upload";
+import type { UserTokenUsage } from "@/lib/token-usage-store";
 
 type ChatInterfaceProps = {
   initialMessages: UIMessage[];
   chatPersistenceEnabled?: boolean;
+  initialTokenUsage: UserTokenUsage | null;
 };
 
 const DEFAULT_RECEIPT_PROMPT =
@@ -37,12 +40,11 @@ function shouldDeferRefocus(relatedTarget: EventTarget | null) {
 export function ChatInterface({
   initialMessages,
   chatPersistenceEnabled = true,
+  initialTokenUsage,
 }: ChatInterfaceProps) {
+  const { exportAllowed, isExporting, downloadCsv } = useReceiptExport();
   const [input, setInput] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState<
-    string | null
-  >(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadedReceipt, setUploadedReceipt] = useState<FileUIPart | null>(
     null,
@@ -51,6 +53,16 @@ export function ChatInterface({
   const [uploadProgress, setUploadProgress] = useState<number | undefined>(
     undefined,
   );
+  const [tokenUsage, setTokenUsage] = useState<UserTokenUsage | null>(
+    initialTokenUsage,
+  );
+  const attachmentPreviewUrl = useMemo(() => {
+    if (!attachedFile) {
+      return null;
+    }
+
+    return URL.createObjectURL(attachedFile);
+  }, [attachedFile]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -108,7 +120,6 @@ export function ChatInterface({
 
   function clearAttachment() {
     setAttachedFile(null);
-    setAttachmentPreviewUrl(null);
     setUploadedReceipt(null);
     setUploadProgress(undefined);
     setUploadError(null);
@@ -147,10 +158,35 @@ export function ChatInterface({
     const text = input.trim() || (hasAttachment ? DEFAULT_RECEIPT_PROMPT : "");
     const files = uploadedReceipt ? [uploadedReceipt] : undefined;
 
-    sendMessage({
-      text,
-      files,
-    });
+    try {
+      await sendMessage({
+        text,
+        files,
+      });
+    } catch (error) {
+      const maybeResponseError = error as {
+        response?: {
+          status?: number;
+          json?: () => Promise<{ usage?: UserTokenUsage }>;
+        };
+      };
+
+      if (
+        maybeResponseError.response?.status === 429 &&
+        maybeResponseError.response.json
+      ) {
+        try {
+          const data = await maybeResponseError.response.json();
+          if (data.usage) {
+            setTokenUsage(data.usage);
+          }
+        } catch (jsonError) {
+          console.error("Failed to parse quota response:", jsonError);
+        }
+      }
+
+      throw error;
+    }
 
     setInput("");
     clearAttachment();
@@ -215,18 +251,12 @@ export function ChatInterface({
   }, [messages.length]);
 
   useEffect(() => {
-    if (!attachedFile) {
-      setAttachmentPreviewUrl(null);
-      return;
-    }
-
-    const objectUrl = URL.createObjectURL(attachedFile);
-    setAttachmentPreviewUrl(objectUrl);
-
     return () => {
-      URL.revokeObjectURL(objectUrl);
+      if (attachmentPreviewUrl) {
+        URL.revokeObjectURL(attachmentPreviewUrl);
+      }
     };
-  }, [attachedFile]);
+  }, [attachmentPreviewUrl]);
 
   function handleInputBlur(event: React.FocusEvent<HTMLTextAreaElement>) {
     const next = event.relatedTarget;
@@ -257,6 +287,30 @@ export function ChatInterface({
           </div>
         ) : null}
 
+        {tokenUsage ? (
+          <div
+            className={`rounded-lg border p-3 text-sm ${
+              tokenUsage.isQuotaExceeded
+                ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200"
+                : "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+            }`}
+          >
+            {tokenUsage.isQuotaExceeded ? (
+              <p className="font-medium">
+                Usage limit reached for this account. Please contact support to
+                extend your quota.
+              </p>
+            ) : (
+              <p>
+                Remaining budget: {tokenUsage.remainingRequestsEstimate} requests
+                (est), {tokenUsage.remainingTotalTokens.toLocaleString()} total
+                tokens, {tokenUsage.remainingOutputTokens.toLocaleString()} output
+                tokens.
+              </p>
+            )}
+          </div>
+        ) : null}
+
         {uploadError ? (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
             {uploadError}
@@ -272,8 +326,8 @@ export function ChatInterface({
 
         {messages.length === 0 ? (
           <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            Ask about your finances, or attach a payment receipt image to scan
-            and ask questions about it.
+            Attach a payment receipt image to scan and save it. You can ask about
+            receipts in this chat or ones you shared earlier.
           </div>
         ) : null}
 
@@ -366,26 +420,38 @@ export function ChatInterface({
             progress={uploadProgress}
             onSelect={(file) => void handleReceiptSelect(file)}
           />
-          <textarea
-            ref={inputRef}
-            autoFocus
-            rows={1}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onBlur={handleInputBlur}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void sendCurrentMessage();
-              }
-            }}
-            placeholder="Ask about your finances or a receipt..."
-            className="h-12 flex-1 resize-none overflow-hidden rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950"
-            disabled={isSending}
-          />
+          <div className="relative min-w-0 flex-1">
+            {exportAllowed ? (
+              <button
+                type="button"
+                onClick={() => void downloadCsv()}
+                disabled={isExporting}
+                className="absolute bottom-[calc(100%+0.5rem)] right-0 z-10 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 shadow-md transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+              >
+                {isExporting ? "Exporting…" : "Export to CSV"}
+              </button>
+            ) : null}
+            <textarea
+              ref={inputRef}
+              autoFocus
+              rows={1}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onBlur={handleInputBlur}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendCurrentMessage();
+                }
+              }}
+              placeholder="Ask about a receipt you shared..."
+              className="h-12 w-full resize-none overflow-hidden rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950"
+              disabled={isSending}
+            />
+          </div>
           <button
             type="submit"
-            disabled={isSending || !canSend}
+            disabled={isSending || !canSend || Boolean(tokenUsage?.isQuotaExceeded)}
             className="h-12 cursor-pointer rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
           >
             {isSending ? "Sending..." : "Send"}

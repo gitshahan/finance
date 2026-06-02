@@ -41,7 +41,9 @@ NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL=/dashboard
 
 In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`. Google and other OAuth providers use a same-window redirect via `/sso-callback`, then land on `/dashboard`.
 
-`DATABASE_URL` is required for saved chat history. Without it, the dashboard still loads and chat works for the current session.
+`DATABASE_URL` is required for saved chat history and indexed receipt records in Neon (`chat_messages` and `user_shared_receipts`). Without it, the dashboard still loads and chat works for the current session.
+
+When `DATABASE_URL` is set, each receipt image you share is extracted and stored so the assistant can answer questions about receipts from earlier sessions. Use the **Receipts & export** tab to filter saved rows (at least one of search, merchant, or date range) and download CSV only when the filter matches **200 rows or fewer** — bulk export of all data is blocked.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
