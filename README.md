@@ -1,4 +1,4 @@
-# Finance Chat — Receipt Assistant
+# Finance Chat
 
 A Next.js app where signed-in users chat with an AI assistant scoped to **payment receipts and data they have shared** (images, CSV attachments, and indexed receipt records). Built for a time-boxed technical assessment; the sections below document approach, trade-offs, and scoping—not only how to run the app.
 
