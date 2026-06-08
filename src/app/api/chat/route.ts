@@ -82,6 +82,7 @@ export async function POST(request: Request) {
       system,
       messages: modelMessages,
       tools: createChatTools({ userId, messages }),
+      maxOutputTokens: 2048,
       stopWhen: stepCountIs(5),
       onFinish: async ({ totalUsage }) => {
         await addUserTokenUsage(userId, {
