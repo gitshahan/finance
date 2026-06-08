@@ -7,6 +7,29 @@ import {
 
 const MAX_CSV_CHARS_FOR_MODEL = 120_000;
 
+/** Keep only the most recent turns to bound history tokens (FIFO sliding window). */
+const MAX_HISTORY_MESSAGES = Math.max(
+  2,
+  Number.parseInt(process.env.CHAT_MAX_HISTORY_MESSAGES ?? "12", 10) || 12,
+);
+
+export function applyHistoryWindow(
+  messages: UIMessage[],
+  max = MAX_HISTORY_MESSAGES,
+): UIMessage[] {
+  return messages.length <= max ? messages : messages.slice(-max);
+}
+
+function findLastUserIndex(messages: UIMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === "user") {
+      return index;
+    }
+  }
+
+  return messages.length - 1;
+}
+
 export function getReceiptBlobPathPrefix(userId: string) {
   return `receipts/${userId}/`;
 }
@@ -129,8 +152,11 @@ export async function prepareMessagesForModel(
   userId: string,
   messages: UIMessage[],
 ): Promise<UIMessage[]> {
+  const windowed = applyHistoryWindow(messages);
+  const lastUserIndex = findLastUserIndex(windowed);
+
   return Promise.all(
-    messages.map(async (message) => ({
+    windowed.map(async (message, index) => ({
       ...message,
       parts: await Promise.all(
         message.parts.map(async (part) => {
@@ -144,6 +170,18 @@ export async function prepareMessagesForModel(
               return {
                 type: "text" as const,
                 text: formatCsvForModel(part.filename, csvText),
+              };
+            }
+
+            // Only inline the (expensive) base64 image for the current turn.
+            // Older receipt images are already captured in the saved receipt
+            // records context, so replace them with a lightweight reference to
+            // avoid re-sending full image payloads on every request.
+            if (index < lastUserIndex) {
+              const label = part.filename ?? "image";
+              return {
+                type: "text" as const,
+                text: `[Earlier image attachment "${label}". Refer to the saved receipt records for its extracted details.]`,
               };
             }
 
