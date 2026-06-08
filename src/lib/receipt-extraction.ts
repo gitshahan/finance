@@ -13,30 +13,34 @@ import {
   type InsertSharedReceiptInput,
 } from "@/lib/shared-data-store";
 
+// Short keys cut output tokens; mapped back to descriptive fields in toInsertInput.
 const receiptExtractionSchema = z.object({
-  isReceipt: z.boolean(),
-  merchant: z.string().nullable(),
-  receiptDate: z
+  rcpt: z.boolean().describe("true if the image is a payment receipt"),
+  mrch: z.string().nullable().describe("merchant or payee"),
+  date: z
     .string()
     .nullable()
     .describe("ISO 8601 date or datetime when visible on the receipt"),
-  totalAmount: z.number().nullable(),
-  currency: z.string().nullable(),
-  paymentMethod: z.string().nullable(),
-  referenceId: z.string().nullable(),
-  taxAmount: z.number().nullable(),
-  lineItems: z
+  amt: z.number().nullable().describe("total amount"),
+  cur: z.string().nullable().describe("currency"),
+  pay: z.string().nullable().describe("payment method"),
+  ref: z.string().nullable().describe("reference or transaction ID"),
+  tax: z.number().nullable().describe("tax or fees"),
+  items: z
     .array(
       z.object({
-        description: z.string(),
-        amount: z.number().nullable(),
+        d: z.string().describe("line item description"),
+        a: z.number().nullable().describe("line item amount"),
       }),
     )
     .optional(),
-  summary: z
+  sum: z
     .string()
-    .describe("One short sentence describing this shared item for later lookup"),
-  notReceiptDescription: z.string().nullable(),
+    .describe("one short sentence describing this item for later lookup"),
+  ndesc: z
+    .string()
+    .nullable()
+    .describe("if not a receipt, what the image shows"),
 });
 
 type ReceiptExtraction = z.infer<typeof receiptExtractionSchema>;
@@ -88,20 +92,23 @@ function toInsertInput(
     userId,
     messageId,
     imageUrl,
-    isReceipt: extraction.isReceipt,
-    merchant: extraction.merchant,
-    receiptDate: parseReceiptDate(extraction.receiptDate),
-    totalAmount: extraction.totalAmount,
-    currency: extraction.currency,
-    paymentMethod: extraction.paymentMethod,
-    referenceId: extraction.referenceId,
-    summary: extraction.isReceipt
-      ? extraction.summary
-      : (extraction.notReceiptDescription ?? extraction.summary),
+    isReceipt: extraction.rcpt,
+    merchant: extraction.mrch,
+    receiptDate: parseReceiptDate(extraction.date),
+    totalAmount: extraction.amt,
+    currency: extraction.cur,
+    paymentMethod: extraction.pay,
+    referenceId: extraction.ref,
+    summary: extraction.rcpt
+      ? extraction.sum
+      : (extraction.ndesc ?? extraction.sum),
     details: {
-      taxAmount: extraction.taxAmount,
-      lineItems: extraction.lineItems ?? [],
-      notReceiptDescription: extraction.notReceiptDescription,
+      taxAmount: extraction.tax,
+      lineItems: (extraction.items ?? []).map((item) => ({
+        description: item.d,
+        amount: item.a,
+      })),
+      notReceiptDescription: extraction.ndesc,
     },
   };
 }
@@ -112,6 +119,7 @@ export async function extractReceiptFromImage(
   const { object } = await generateObject({
     model: CHAT_MODEL,
     schema: zodSchema(receiptExtractionSchema),
+    maxOutputTokens: 1024,
     messages: [
       {
         role: "user",
