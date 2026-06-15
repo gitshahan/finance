@@ -112,6 +112,7 @@ export async function extractReceiptFromImage(
   const { object } = await generateObject({
     model: CHAT_MODEL,
     schema: zodSchema(receiptExtractionSchema),
+    maxOutputTokens: 1024,
     messages: [
       {
         role: "user",

@@ -5,7 +5,7 @@ import {
   isCsvFilename,
 } from "@/lib/receipt-image-url";
 
-const MAX_CSV_CHARS_FOR_MODEL = 120_000;
+const MAX_CSV_CHARS_FOR_MODEL = 48_000;
 
 export function getReceiptBlobPathPrefix(userId: string) {
   return `receipts/${userId}/`;

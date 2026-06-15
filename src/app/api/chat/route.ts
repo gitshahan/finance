@@ -11,6 +11,7 @@ import {
   replaceMessagesByUser,
 } from "@/lib/chat-store";
 import { buildChatSystemPrompt } from "@/lib/chat-context";
+import { selectRecentMessages } from "@/lib/chat-history";
 import {
   messagesOnlyUseOwnedReceiptBlobs,
   prepareMessagesForModel,
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
 
     const system = await buildChatSystemPrompt(userId);
     const modelMessages = await convertToModelMessages(
-      await prepareMessagesForModel(userId, messages),
+      await prepareMessagesForModel(userId, selectRecentMessages(messages)),
     );
 
     const result = streamText({
@@ -83,6 +84,7 @@ export async function POST(request: Request) {
       messages: modelMessages,
       tools: createChatTools({ userId, messages }),
       stopWhen: stepCountIs(5),
+      maxOutputTokens: 2048,
       onFinish: async ({ totalUsage }) => {
         await addUserTokenUsage(userId, {
           inputTokens: totalUsage.inputTokens,
