@@ -35,7 +35,7 @@ type SharedReceiptRow = {
   created_at: string;
 };
 
-const MAX_RECEIPTS_IN_PROMPT = 100;
+const MAX_RECEIPTS_IN_PROMPT = 40;
 
 export function isSharedDataConfigured() {
   return isDatabaseConfigured();
@@ -337,46 +337,46 @@ export function formatSharedReceiptsForPrompt(
     return null;
   }
 
-  const lines = receipts.map((receipt, index) => {
-    const parts = [`${index + 1}. id=${receipt.id}`];
+  const lines = receipts.map((receipt) => {
+    const parts = [`id=${receipt.id}`];
 
     if (!receipt.isReceipt) {
-      parts.push("type=non-receipt image");
+      parts.push("type=non-receipt");
       if (receipt.summary) {
         parts.push(`note=${receipt.summary}`);
       }
-      parts.push(`shared_at=${receipt.createdAt}`);
+      parts.push(`at=${receipt.createdAt}`);
       return parts.join(" | ");
     }
 
     if (receipt.merchant) {
-      parts.push(`merchant=${receipt.merchant}`);
+      parts.push(`m=${receipt.merchant}`);
     }
 
     if (receipt.receiptDate) {
-      parts.push(`date=${receipt.receiptDate}`);
+      parts.push(`d=${receipt.receiptDate}`);
     }
 
     const amount = formatAmount(receipt.totalAmount, receipt.currency);
     if (amount) {
-      parts.push(`total=${amount}`);
+      parts.push(`tot=${amount}`);
     }
 
     if (receipt.paymentMethod) {
-      parts.push(`payment=${receipt.paymentMethod}`);
+      parts.push(`pay=${receipt.paymentMethod}`);
     }
 
     if (receipt.referenceId) {
-      parts.push(`reference=${receipt.referenceId}`);
+      parts.push(`ref=${receipt.referenceId}`);
     }
 
     if (receipt.summary) {
-      parts.push(`summary=${receipt.summary}`);
+      parts.push(`note=${receipt.summary}`);
     }
 
-    parts.push(`shared_at=${receipt.createdAt}`);
+    parts.push(`at=${receipt.createdAt}`);
     return parts.join(" | ");
   });
 
-  return lines.join("\n");
+  return `Fields: m=merchant, d=date, tot=total, pay=payment method, ref=reference, note=summary, at=shared time.\n${lines.join("\n")}`;
 }
