@@ -11,6 +11,7 @@ import {
   replaceMessagesByUser,
 } from "@/lib/chat-store";
 import { buildChatSystemPrompt } from "@/lib/chat-context";
+import { applyHistoryWindow } from "@/lib/chat-history-window";
 import {
   messagesOnlyUseOwnedReceiptBlobs,
   prepareMessagesForModel,
@@ -21,6 +22,8 @@ import { CHAT_MODEL } from "@/lib/ai-model";
 import { createChatTools } from "@/lib/chat-tools";
 
 export const maxDuration = 60;
+
+const MAX_CHAT_OUTPUT_TOKENS = 1500;
 
 type ChatRequestBody = {
   messages: UIMessage[];
@@ -74,7 +77,7 @@ export async function POST(request: Request) {
 
     const system = await buildChatSystemPrompt(userId);
     const modelMessages = await convertToModelMessages(
-      await prepareMessagesForModel(userId, messages),
+      await prepareMessagesForModel(userId, applyHistoryWindow(messages)),
     );
 
     const result = streamText({
@@ -82,6 +85,7 @@ export async function POST(request: Request) {
       system,
       messages: modelMessages,
       tools: createChatTools({ userId, messages }),
+      maxOutputTokens: MAX_CHAT_OUTPUT_TOKENS,
       stopWhen: stepCountIs(5),
       onFinish: async ({ totalUsage }) => {
         await addUserTokenUsage(userId, {
