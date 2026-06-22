@@ -32,6 +32,7 @@ const receiptExtractionSchema = z.object({
         amount: z.number().nullable(),
       }),
     )
+    .max(50)
     .optional(),
   summary: z
     .string()
@@ -40,6 +41,8 @@ const receiptExtractionSchema = z.object({
 });
 
 type ReceiptExtraction = z.infer<typeof receiptExtractionSchema>;
+
+const MAX_EXTRACTION_OUTPUT_TOKENS = 800;
 
 function isCsvBlobUrl(url: string) {
   try {
@@ -112,13 +115,14 @@ export async function extractReceiptFromImage(
   const { object } = await generateObject({
     model: CHAT_MODEL,
     schema: zodSchema(receiptExtractionSchema),
+    maxOutputTokens: MAX_EXTRACTION_OUTPUT_TOKENS,
     messages: [
       {
         role: "user",
         content: [
           {
             type: "text",
-            text: "Extract structured fields from this image. Use only visible information. Use null when a field is missing or unreadable.",
+            text: "Extract structured fields from this image. Use only visible text; use null for missing or unreadable fields.",
           },
           {
             type: "image",
