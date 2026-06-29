@@ -32,6 +32,7 @@ const receiptExtractionSchema = z.object({
         amount: z.number().nullable(),
       }),
     )
+    .max(50)
     .optional(),
   summary: z
     .string()
@@ -112,6 +113,7 @@ export async function extractReceiptFromImage(
   const { object } = await generateObject({
     model: CHAT_MODEL,
     schema: zodSchema(receiptExtractionSchema),
+    maxOutputTokens: 800,
     messages: [
       {
         role: "user",
