@@ -11,6 +11,7 @@ import {
   replaceMessagesByUser,
 } from "@/lib/chat-store";
 import { buildChatSystemPrompt } from "@/lib/chat-context";
+import { applyHistoryWindow } from "@/lib/chat-history-window";
 import {
   messagesOnlyUseOwnedReceiptBlobs,
   prepareMessagesForModel,
@@ -73,8 +74,11 @@ export async function POST(request: Request) {
     }
 
     const system = await buildChatSystemPrompt(userId);
+    // Trim to a sliding window before re-inlining blobs so old image turns are
+    // not re-fetched/re-sent each request. Full thread is still persisted below.
+    const windowedMessages = applyHistoryWindow(messages);
     const modelMessages = await convertToModelMessages(
-      await prepareMessagesForModel(userId, messages),
+      await prepareMessagesForModel(userId, windowedMessages),
     );
 
     const result = streamText({
@@ -83,6 +87,7 @@ export async function POST(request: Request) {
       messages: modelMessages,
       tools: createChatTools({ userId, messages }),
       stopWhen: stepCountIs(5),
+      maxOutputTokens: 1500,
       onFinish: async ({ totalUsage }) => {
         await addUserTokenUsage(userId, {
           inputTokens: totalUsage.inputTokens,

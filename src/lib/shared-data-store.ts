@@ -35,7 +35,7 @@ type SharedReceiptRow = {
   created_at: string;
 };
 
-const MAX_RECEIPTS_IN_PROMPT = 100;
+const MAX_RECEIPTS_IN_PROMPT = 40;
 
 export function isSharedDataConfigured() {
   return isDatabaseConfigured();
@@ -330,6 +330,17 @@ function formatAmount(
   return currency ? `${currency} ${formatted}` : formatted;
 }
 
+function toDateOnly(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  // ISO timestamps -> YYYY-MM-DD; time-of-day is rarely needed for lookups and
+  // wastes tokens across many records.
+  const match = value.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : value;
+}
+
 export function formatSharedReceiptsForPrompt(
   receipts: SharedReceiptRecord[],
 ): string | null {
@@ -341,11 +352,11 @@ export function formatSharedReceiptsForPrompt(
     const parts = [`${index + 1}. id=${receipt.id}`];
 
     if (!receipt.isReceipt) {
-      parts.push("type=non-receipt image");
+      parts.push("type=non-receipt");
       if (receipt.summary) {
         parts.push(`note=${receipt.summary}`);
       }
-      parts.push(`shared_at=${receipt.createdAt}`);
+      parts.push(`shared=${toDateOnly(receipt.createdAt)}`);
       return parts.join(" | ");
     }
 
@@ -353,8 +364,9 @@ export function formatSharedReceiptsForPrompt(
       parts.push(`merchant=${receipt.merchant}`);
     }
 
-    if (receipt.receiptDate) {
-      parts.push(`date=${receipt.receiptDate}`);
+    const date = toDateOnly(receipt.receiptDate);
+    if (date) {
+      parts.push(`date=${date}`);
     }
 
     const amount = formatAmount(receipt.totalAmount, receipt.currency);
@@ -363,18 +375,18 @@ export function formatSharedReceiptsForPrompt(
     }
 
     if (receipt.paymentMethod) {
-      parts.push(`payment=${receipt.paymentMethod}`);
+      parts.push(`pay=${receipt.paymentMethod}`);
     }
 
     if (receipt.referenceId) {
-      parts.push(`reference=${receipt.referenceId}`);
+      parts.push(`ref=${receipt.referenceId}`);
     }
 
     if (receipt.summary) {
-      parts.push(`summary=${receipt.summary}`);
+      parts.push(`sum=${receipt.summary}`);
     }
 
-    parts.push(`shared_at=${receipt.createdAt}`);
+    parts.push(`shared=${toDateOnly(receipt.createdAt)}`);
     return parts.join(" | ");
   });
 

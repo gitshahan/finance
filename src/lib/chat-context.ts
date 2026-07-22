@@ -10,7 +10,7 @@ export async function buildChatSystemPrompt(userId: string) {
     return buildReceiptAssistantSystemPrompt(null);
   }
 
-  const receipts = await listSharedReceiptsForUser(userId, { limit: 100 });
+  const receipts = await listSharedReceiptsForUser(userId, { limit: 40 });
   const savedReceiptsContext = formatSharedReceiptsForPrompt(receipts);
 
   return buildReceiptAssistantSystemPrompt(savedReceiptsContext);
