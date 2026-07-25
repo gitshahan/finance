@@ -3,6 +3,10 @@
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import { AssistantMessageHtml } from "@/components/assistant-message-html";
 import { ChatCsvDownload } from "@/components/chat-csv-download";
+import {
+  ChatSpendSummary,
+  isSpendSummaryResult,
+} from "@/components/chat-spend-summary";
 import type {
   CsvDownloadToolError,
   CsvDownloadToolOutput,
@@ -24,16 +28,14 @@ function isRenderableImagePart(
     return false;
   }
 
-  // Local object URLs / data URLs for in-progress uploads.
   if (part.url.startsWith("blob:") || part.url.startsWith("data:")) {
     return Boolean(part.mediaType?.startsWith("image/"));
   }
 
-  // Only proxy owned receipt blobs — never render arbitrary remote URLs.
   return isLikelyReceiptBlobUrl(part.url);
 }
 
-type GenerateCsvDownloadToolPart = {
+type ToolPart = {
   type: string;
   state:
     | "input-streaming"
@@ -44,10 +46,11 @@ type GenerateCsvDownloadToolPart = {
   errorText?: string;
 };
 
-function isGenerateCsvDownloadPart(
+function isNamedToolPart(
   part: UIMessage["parts"][number],
-): part is UIMessage["parts"][number] & GenerateCsvDownloadToolPart {
-  return isToolUIPart(part) && getToolName(part) === "generateCsvDownload";
+  name: string,
+): part is UIMessage["parts"][number] & ToolPart & { type: `tool-${string}` } {
+  return isToolUIPart(part) && getToolName(part) === name;
 }
 
 function isCsvDownloadOutput(
@@ -60,6 +63,25 @@ function isCsvDownloadOutput(
   );
 }
 
+function ToolStatus({
+  messageId,
+  index,
+  label,
+}: {
+  messageId: string;
+  index: number;
+  label: string;
+}) {
+  return (
+    <p
+      key={`${messageId}-tool-${index}`}
+      className="text-sm text-zinc-600 dark:text-zinc-400"
+    >
+      {label}
+    </p>
+  );
+}
+
 export function ChatMessageContent({
   message,
   isLoading = false,
@@ -68,7 +90,13 @@ export function ChatMessageContent({
     (part) =>
       (part.type === "text" && part.text) ||
       isRenderableImagePart(part) ||
-      isGenerateCsvDownloadPart(part),
+      isNamedToolPart(part, "generateCsvDownload") ||
+      isNamedToolPart(part, "summarizeSpend") ||
+      isNamedToolPart(part, "searchSavedReceipts") ||
+      isNamedToolPart(part, "confirmSavedReceipt") ||
+      isNamedToolPart(part, "updateSavedReceipt") ||
+      isNamedToolPart(part, "deleteSavedReceipt") ||
+      isNamedToolPart(part, "setMerchantCategory"),
   );
 
   if (!hasRenderableContent) {
@@ -118,40 +146,161 @@ export function ChatMessageContent({
           );
         }
 
-        if (isGenerateCsvDownloadPart(part)) {
+        if (isNamedToolPart(part, "summarizeSpend")) {
+          const toolPart = part as UIMessage["parts"][number] & ToolPart;
+
           if (
-            part.state === "input-streaming" ||
-            part.state === "input-available"
+            toolPart.state === "input-streaming" ||
+            toolPart.state === "input-available"
           ) {
             return (
+              <ToolStatus
+                key={`${message.id}-spend-${index}`}
+                messageId={message.id}
+                index={index}
+                label="Summarizing spend…"
+              />
+            );
+          }
+
+          if (toolPart.state === "output-error") {
+            return (
               <p
-                key={`${message.id}-csv-${index}`}
-                className="text-sm text-zinc-600 dark:text-zinc-400"
+                key={`${message.id}-spend-${index}`}
+                className="text-sm text-red-700 dark:text-red-300"
               >
-                Preparing CSV download…
+                {toolPart.errorText ?? "Could not summarize spend."}
               </p>
             );
           }
 
-          if (part.state === "output-error") {
+          if (
+            toolPart.state === "output-available" &&
+            isSpendSummaryResult(toolPart.output)
+          ) {
+            return (
+              <ChatSpendSummary
+                key={`${message.id}-spend-${index}`}
+                summary={toolPart.output}
+              />
+            );
+          }
+
+          return null;
+        }
+
+        if (isNamedToolPart(part, "searchSavedReceipts")) {
+          const toolPart = part as UIMessage["parts"][number] & ToolPart;
+
+          if (
+            toolPart.state === "input-streaming" ||
+            toolPart.state === "input-available"
+          ) {
+            return (
+              <ToolStatus
+                key={`${message.id}-search-${index}`}
+                messageId={message.id}
+                index={index}
+                label="Searching saved receipts…"
+              />
+            );
+          }
+
+          if (
+            toolPart.state === "output-available" &&
+            typeof toolPart.output === "object" &&
+            toolPart.output !== null &&
+            "totalCount" in toolPart.output
+          ) {
+            const output = toolPart.output as {
+              totalCount: number;
+              returnedCount: number;
+              truncated?: boolean;
+            };
+            return (
+              <p
+                key={`${message.id}-search-${index}`}
+                className="text-xs text-zinc-500 dark:text-zinc-400"
+              >
+                Found {output.totalCount} saved receipt
+                {output.totalCount === 1 ? "" : "s"}
+                {output.truncated
+                  ? ` (showing ${output.returnedCount})`
+                  : ""}
+                .
+              </p>
+            );
+          }
+
+          return null;
+        }
+
+        const memoryToolLabel = isNamedToolPart(part, "confirmSavedReceipt")
+          ? "Confirming receipt…"
+          : isNamedToolPart(part, "updateSavedReceipt")
+            ? "Updating receipt…"
+            : isNamedToolPart(part, "deleteSavedReceipt")
+              ? "Deleting receipt…"
+              : isNamedToolPart(part, "setMerchantCategory")
+                ? "Saving category…"
+                : null;
+
+        if (memoryToolLabel) {
+          const toolPart = part as UIMessage["parts"][number] & ToolPart;
+
+          if (
+            toolPart.state === "input-streaming" ||
+            toolPart.state === "input-available"
+          ) {
+            return (
+              <ToolStatus
+                key={`${message.id}-mem-${index}`}
+                messageId={message.id}
+                index={index}
+                label={memoryToolLabel}
+              />
+            );
+          }
+
+          return null;
+        }
+
+        if (isNamedToolPart(part, "generateCsvDownload")) {
+          const toolPart = part as UIMessage["parts"][number] & ToolPart;
+
+          if (
+            toolPart.state === "input-streaming" ||
+            toolPart.state === "input-available"
+          ) {
+            return (
+              <ToolStatus
+                key={`${message.id}-csv-${index}`}
+                messageId={message.id}
+                index={index}
+                label="Preparing CSV download…"
+              />
+            );
+          }
+
+          if (toolPart.state === "output-error") {
             return (
               <p
                 key={`${message.id}-csv-${index}`}
                 className="text-sm text-red-700 dark:text-red-300"
               >
-                {part.errorText ?? "Could not create the CSV file."}
+                {toolPart.errorText ?? "Could not create the CSV file."}
               </p>
             );
           }
 
           if (
-            part.state === "output-available" &&
-            isCsvDownloadOutput(part.output)
+            toolPart.state === "output-available" &&
+            isCsvDownloadOutput(toolPart.output)
           ) {
             return (
               <ChatCsvDownload
                 key={`${message.id}-csv-${index}`}
-                output={part.output}
+                output={toolPart.output}
               />
             );
           }

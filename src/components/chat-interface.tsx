@@ -11,6 +11,7 @@ import { uploadReceiptImage } from "@/lib/receipt-upload";
 import type { UserTokenUsage } from "@/lib/token-usage-store";
 
 type ChatInterfaceProps = {
+  chatId?: string;
   initialMessages: UIMessage[];
   chatPersistenceEnabled?: boolean;
   usageTrackingEnabled?: boolean;
@@ -43,6 +44,7 @@ function shouldDeferRefocus(relatedTarget: EventTarget | null) {
 }
 
 export function ChatInterface({
+  chatId = "default",
   initialMessages,
   chatPersistenceEnabled = true,
   usageTrackingEnabled = true,
@@ -73,9 +75,11 @@ export function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const didInitialScrollRef = useRef(false);
   const { messages, sendMessage, status, error } = useChat({
+    id: chatId,
     messages: initialMessages,
     transport: new DefaultChatTransport({
       api: "/api/chat",
+      body: { chatId },
     }),
   });
   const prevStatusRef = useRef(status);
@@ -364,9 +368,15 @@ export function ChatInterface({
         ) : null}
 
         {messages.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            Attach a payment receipt image or CSV to analyze it. You can ask about
-            receipts in this chat or ones you shared earlier.
+          <div className="space-y-3 rounded-lg border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+            <p>
+              Attach this week&apos;s receipt images or a bank/card CSV to build
+              your receipt memory.
+            </p>
+            <p className="text-zinc-600 dark:text-zinc-300">
+              Try asking: &quot;How much did I spend on dining this month?&quot; or
+              &quot;Export my Netflix receipts.&quot;
+            </p>
           </div>
         ) : null}
 

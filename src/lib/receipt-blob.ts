@@ -207,3 +207,33 @@ export async function deleteOrphanedReceiptBlobs(
     }),
   );
 }
+
+/** Delete a blob when it is no longer referenced by chat messages or the receipt index. */
+export async function deleteReceiptBlobIfUnreferenced(
+  userId: string,
+  sourceUrl: string,
+  messages: UIMessage[],
+  remainingIndexedReferences: number,
+) {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return;
+  }
+
+  if (!userOwnsReceiptBlobUrl(sourceUrl, userId)) {
+    return;
+  }
+
+  if (extractReceiptBlobUrls(messages, userId).includes(sourceUrl)) {
+    return;
+  }
+
+  if (remainingIndexedReferences > 0) {
+    return;
+  }
+
+  try {
+    await del(sourceUrl);
+  } catch (error) {
+    console.error("Failed to delete unreferenced receipt blob:", sourceUrl, error);
+  }
+}
