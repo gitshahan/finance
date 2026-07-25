@@ -72,7 +72,9 @@ function buildUsageSummary(
     percentRemaining(remainingRequestsEstimate, MAX_REQUEST_COUNT),
   );
   const isQuotaExceeded =
-    totalTokens >= MAX_TOTAL_TOKENS || totalOutputTokens >= MAX_OUTPUT_TOKENS;
+    totalTokens >= MAX_TOTAL_TOKENS ||
+    totalOutputTokens >= MAX_OUTPUT_TOKENS ||
+    requestCount >= MAX_REQUEST_COUNT;
 
   return {
     userId,
@@ -131,12 +133,56 @@ export async function getUserTokenUsage(userId: string): Promise<UserTokenUsage>
   return buildUsageSummary(userId, rows[0] ?? null);
 }
 
+/**
+ * Atomically reserve one request slot if under the request limit.
+ * Returns updated usage, or null if the request quota is already exhausted.
+ */
+export async function tryReserveChatRequest(
+  userId: string,
+): Promise<UserTokenUsage | null> {
+  if (!isTokenUsageConfigured()) {
+    return buildUsageSummary(userId, null);
+  }
+
+  await ensureTokenUsageTable();
+  const sql = getSqlClient();
+
+  const rows = (await sql`
+    INSERT INTO user_token_usage (
+      user_id,
+      total_input_tokens,
+      total_output_tokens,
+      total_tokens,
+      request_count
+    )
+    VALUES (${userId}, 0, 0, 0, 1)
+    ON CONFLICT (user_id) DO UPDATE SET
+      request_count = user_token_usage.request_count + 1,
+      updated_at = NOW()
+    WHERE user_token_usage.request_count < ${MAX_REQUEST_COUNT}
+    RETURNING
+      user_id,
+      total_input_tokens,
+      total_output_tokens,
+      total_tokens,
+      request_count
+  `) as UserTokenUsageRow[];
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return buildUsageSummary(userId, rows[0]!);
+}
+
 export async function addUserTokenUsage(
   userId: string,
   usage: {
     inputTokens?: number;
     outputTokens?: number;
     totalTokens?: number;
+    /** When true, do not increment request_count (already reserved). */
+    skipRequestIncrement?: boolean;
   },
 ) {
   if (!isTokenUsageConfigured()) {
@@ -151,6 +197,7 @@ export async function addUserTokenUsage(
   const totalTokens = toSafeNonNegativeInt(
     usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
   );
+  const requestIncrement = usage.skipRequestIncrement ? 0 : 1;
 
   await sql`
     INSERT INTO user_token_usage (
@@ -165,13 +212,13 @@ export async function addUserTokenUsage(
       ${inputTokens},
       ${outputTokens},
       ${totalTokens},
-      1
+      ${requestIncrement}
     )
     ON CONFLICT (user_id) DO UPDATE SET
       total_input_tokens = user_token_usage.total_input_tokens + EXCLUDED.total_input_tokens,
       total_output_tokens = user_token_usage.total_output_tokens + EXCLUDED.total_output_tokens,
       total_tokens = user_token_usage.total_tokens + EXCLUDED.total_tokens,
-      request_count = user_token_usage.request_count + 1,
+      request_count = user_token_usage.request_count + EXCLUDED.request_count,
       updated_at = NOW()
   `;
 }

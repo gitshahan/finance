@@ -1,16 +1,34 @@
 import type { FileUIPart } from "ai";
 import {
+  getForcedUploadContentType,
   getReceiptUploadSizeLimitError,
-  guessReceiptUploadContentType,
+  isSupportedReceiptUpload,
 } from "@/lib/receipt-image-url";
 
 export function uploadReceiptImage(
   file: File,
   onProgress?: (percent: number) => void,
 ): Promise<FileUIPart> {
+  if (!isSupportedReceiptUpload(file)) {
+    return Promise.reject(
+      new Error(
+        "Only image files (JPEG, PNG, WebP, etc.) and CSV files are supported.",
+      ),
+    );
+  }
+
   const sizeLimitError = getReceiptUploadSizeLimitError(file);
   if (sizeLimitError) {
     return Promise.reject(new Error(sizeLimitError));
+  }
+
+  const mediaType = getForcedUploadContentType(file.name);
+  if (!mediaType) {
+    return Promise.reject(
+      new Error(
+        "Only image files (JPEG, PNG, WebP, etc.) and CSV files are supported.",
+      ),
+    );
   }
 
   return new Promise((resolve, reject) => {
@@ -41,7 +59,7 @@ export function uploadReceiptImage(
 
         resolve({
           type: "file",
-          mediaType: file.type || guessReceiptUploadContentType(file.name),
+          mediaType,
           filename: file.name,
           url: payload.url,
         });

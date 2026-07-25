@@ -8,8 +8,55 @@ const IMAGE_EXTENSIONS = new Set([
   "heif",
 ]);
 
-export function guessImageContentType(filename: string) {
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+]);
+
+const ALLOWED_CSV_MIME_TYPES = new Set([
+  "text/csv",
+  "application/csv",
+  "application/vnd.ms-excel",
+]);
+
+export function getFileExtension(filename: string): string | null {
   const extension = filename.split(".").pop()?.toLowerCase();
+  if (!extension || extension === filename.toLowerCase()) {
+    return null;
+  }
+
+  // Reject path separators / traversal in the extension segment.
+  if (/[^a-z0-9]/.test(extension)) {
+    return null;
+  }
+
+  return extension;
+}
+
+/** Allowlisted extension for blob storage keys, or null if unsupported. */
+export function getAllowedUploadExtension(filename: string): string | null {
+  const extension = getFileExtension(filename);
+  if (!extension) {
+    return null;
+  }
+
+  if (extension === "csv") {
+    return "csv";
+  }
+
+  if (IMAGE_EXTENSIONS.has(extension)) {
+    return extension === "jpeg" ? "jpg" : extension;
+  }
+
+  return null;
+}
+
+export function guessImageContentType(filename: string) {
+  const extension = getFileExtension(filename);
 
   switch (extension) {
     case "png":
@@ -28,28 +75,25 @@ export function guessImageContentType(filename: string) {
 }
 
 export function isImageFile(file: File) {
-  if (file.type.startsWith("image/")) {
+  const extension = getFileExtension(file.name);
+  if (extension && IMAGE_EXTENSIONS.has(extension)) {
     return true;
   }
 
-  const extension = file.name.split(".").pop()?.toLowerCase();
-  return extension ? IMAGE_EXTENSIONS.has(extension) : false;
+  // Never trust image/svg+xml or other non-allowlisted image MIME types.
+  return ALLOWED_IMAGE_MIME_TYPES.has(file.type);
 }
 
 export function isCsvFile(file: File) {
-  if (
-    file.type === "text/csv" ||
-    file.type === "application/csv" ||
-    file.type === "application/vnd.ms-excel"
-  ) {
+  if (ALLOWED_CSV_MIME_TYPES.has(file.type)) {
     return true;
   }
 
-  return file.name.split(".").pop()?.toLowerCase() === "csv";
+  return getFileExtension(file.name) === "csv";
 }
 
 export function isSupportedReceiptUpload(file: File) {
-  return isImageFile(file) || isCsvFile(file);
+  return getAllowedUploadExtension(file.name) !== null && (isImageFile(file) || isCsvFile(file));
 }
 
 export const MAX_RECEIPT_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -72,7 +116,7 @@ export function getReceiptUploadSizeLimitError(file: File): string | null {
 }
 
 export function isCsvFilename(filename: string) {
-  return filename.split(".").pop()?.toLowerCase() === "csv";
+  return getFileExtension(filename) === "csv";
 }
 
 export function guessReceiptUploadContentType(filename: string) {
@@ -81,6 +125,22 @@ export function guessReceiptUploadContentType(filename: string) {
   }
 
   return guessImageContentType(filename);
+}
+
+/**
+ * Content-Type derived only from allowlisted extension — never from client MIME.
+ */
+export function getForcedUploadContentType(filename: string): string | null {
+  const extension = getAllowedUploadExtension(filename);
+  if (!extension) {
+    return null;
+  }
+
+  if (extension === "csv") {
+    return "text/csv";
+  }
+
+  return guessImageContentType(`.${extension}`);
 }
 
 export function isLikelyReceiptBlobUrl(url: string) {

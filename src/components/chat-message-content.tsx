@@ -20,11 +20,17 @@ type ChatMessageContentProps = {
 function isRenderableImagePart(
   part: UIMessage["parts"][number],
 ): part is Extract<UIMessage["parts"][number], { type: "file" }> {
-  return (
-    part.type === "file" &&
-    Boolean(part.url) &&
-    (part.mediaType?.startsWith("image/") || isLikelyReceiptBlobUrl(part.url))
-  );
+  if (part.type !== "file" || !part.url) {
+    return false;
+  }
+
+  // Local object URLs / data URLs for in-progress uploads.
+  if (part.url.startsWith("blob:") || part.url.startsWith("data:")) {
+    return Boolean(part.mediaType?.startsWith("image/"));
+  }
+
+  // Only proxy owned receipt blobs — never render arbitrary remote URLs.
+  return isLikelyReceiptBlobUrl(part.url);
 }
 
 type GenerateCsvDownloadToolPart = {
@@ -97,9 +103,10 @@ export function ChatMessageContent({
         }
 
         if (isRenderableImagePart(part)) {
-          const imageSrc = isLikelyReceiptBlobUrl(part.url)
-            ? getReceiptImageProxyUrl(part.url)
-            : part.url;
+          const imageSrc =
+            part.url.startsWith("blob:") || part.url.startsWith("data:")
+              ? part.url
+              : getReceiptImageProxyUrl(part.url);
 
           return (
             <img

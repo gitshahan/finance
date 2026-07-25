@@ -1,7 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { get } from "@vercel/blob";
 import { userOwnsReceiptBlobUrl } from "@/lib/receipt-blob";
-import { guessReceiptUploadContentType } from "@/lib/receipt-image-url";
+import {
+  guessReceiptUploadContentType,
+  isCsvFilename,
+} from "@/lib/receipt-image-url";
 
 export async function GET(request: Request) {
   try {
@@ -23,13 +26,23 @@ export async function GET(request: Request) {
       return new Response("Not found", { status: 404 });
     }
 
-    return new Response(result.stream, {
-      headers: {
-        "Content-Type":
-          result.blob.contentType ?? guessReceiptUploadContentType(blobUrl),
-        "Cache-Control": "private, max-age=3600",
-      },
-    });
+    const contentType =
+      result.blob.contentType ?? guessReceiptUploadContentType(blobUrl);
+    const headers: Record<string, string> = {
+      "Content-Type": contentType,
+      "Cache-Control": "private, max-age=3600",
+      "X-Content-Type-Options": "nosniff",
+    };
+
+    if (
+      contentType === "text/csv" ||
+      contentType === "application/csv" ||
+      isCsvFilename(blobUrl)
+    ) {
+      headers["Content-Disposition"] = 'attachment; filename="export.csv"';
+    }
+
+    return new Response(result.stream, { headers });
   } catch (error) {
     console.error("Receipt image fetch failed:", error);
     return new Response("Unable to load receipt image.", { status: 500 });

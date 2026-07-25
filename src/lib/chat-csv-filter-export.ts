@@ -51,19 +51,23 @@ function normalizeFilename(filename: string | undefined) {
   return (filename ?? "upload.csv").trim().toLowerCase();
 }
 
+function normalizedFilterTerms(terms: string[] | undefined) {
+  return (terms ?? [])
+    .map((term) => term.trim().toLowerCase())
+    .filter((term) => term.length > 0);
+}
+
 function rowMatchesFilter(row: string[], filter: CsvAttachmentFilter) {
   const haystack = row.join("\u0001").toLowerCase();
+  const allTerms = normalizedFilterTerms(filter.allTermsInRow);
+  const anyTerms = normalizedFilterTerms(filter.anyTermInRow);
 
-  if (filter.allTermsInRow?.length) {
-    return filter.allTermsInRow.every((term) =>
-      haystack.includes(term.trim().toLowerCase()),
-    );
+  if (allTerms.length) {
+    return allTerms.every((term) => haystack.includes(term));
   }
 
-  if (filter.anyTermInRow?.length) {
-    return filter.anyTermInRow.some((term) =>
-      haystack.includes(term.trim().toLowerCase()),
-    );
+  if (anyTerms.length) {
+    return anyTerms.some((term) => haystack.includes(term));
   }
 
   return true;

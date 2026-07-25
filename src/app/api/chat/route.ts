@@ -17,16 +17,39 @@ import {
   prepareMessagesForModel,
 } from "@/lib/receipt-blob";
 import { syncNewReceiptsFromMessages } from "@/lib/receipt-extraction";
-import { addUserTokenUsage, getUserTokenUsage } from "@/lib/token-usage-store";
+import {
+  addUserTokenUsage,
+  getUserTokenUsage,
+  tryReserveChatRequest,
+} from "@/lib/token-usage-store";
 import { CHAT_MODEL } from "@/lib/ai-model";
 import { createChatTools } from "@/lib/chat-tools";
 
 export const maxDuration = 60;
 
+const MAX_CHAT_MESSAGES = 200;
+const MAX_MESSAGE_PARTS = 40;
+
 type ChatRequestBody = {
   messages: UIMessage[];
   userId?: string;
 };
+
+function isValidChatMessages(messages: unknown): messages is UIMessage[] {
+  return (
+    Array.isArray(messages) &&
+    messages.length > 0 &&
+    messages.length <= MAX_CHAT_MESSAGES &&
+    messages.every(
+      (message) =>
+        message &&
+        typeof message === "object" &&
+        typeof (message as UIMessage).id === "string" &&
+        Array.isArray((message as UIMessage).parts) &&
+        (message as UIMessage).parts.length <= MAX_MESSAGE_PARTS,
+    )
+  );
+}
 
 export async function POST(request: Request) {
   try {
@@ -53,9 +76,14 @@ export async function POST(request: Request) {
 
     const { messages } = body;
 
+    if (!isValidChatMessages(messages)) {
+      return new Response("Invalid or oversized chat payload.", { status: 400 });
+    }
+
     if (!messagesOnlyUseOwnedReceiptBlobs(userId, messages)) {
       return new Response("Forbidden", { status: 403 });
     }
+
     const usage = await getUserTokenUsage(userId);
 
     if (usage.isQuotaExceeded) {
@@ -64,6 +92,34 @@ export async function POST(request: Request) {
           error:
             "Usage limit reached. You have used your allocated token budget for this account.",
           usage,
+        },
+        { status: 429 },
+      );
+    }
+
+    const reservedUsage = await tryReserveChatRequest(userId);
+
+    if (!reservedUsage) {
+      const latestUsage = await getUserTokenUsage(userId);
+      return Response.json(
+        {
+          error:
+            "Usage limit reached. You have used your allocated token budget for this account.",
+          usage: latestUsage,
+        },
+        { status: 429 },
+      );
+    }
+
+    if (
+      reservedUsage.totalTokens >= reservedUsage.maxTotalTokens ||
+      reservedUsage.totalOutputTokens >= reservedUsage.maxOutputTokens
+    ) {
+      return Response.json(
+        {
+          error:
+            "Usage limit reached. You have used your allocated token budget for this account.",
+          usage: reservedUsage,
         },
         { status: 429 },
       );
@@ -93,6 +149,7 @@ export async function POST(request: Request) {
           inputTokens: totalUsage.inputTokens,
           outputTokens: totalUsage.outputTokens,
           totalTokens: totalUsage.totalTokens,
+          skipRequestIncrement: true,
         });
       },
     });

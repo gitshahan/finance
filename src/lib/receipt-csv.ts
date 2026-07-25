@@ -5,7 +5,12 @@ function escapeCsvCell(value: string | number | boolean | null | undefined) {
     return "";
   }
 
-  const text = String(value);
+  let text = String(value);
+
+  // Neutralize spreadsheet formula injection when opened in Excel/Sheets.
+  if (/^[=+\-@\t\r]/.test(text)) {
+    text = `'${text}`;
+  }
 
   if (/[",\n\r]/.test(text)) {
     return `"${text.replaceAll('"', '""')}"`;

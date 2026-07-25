@@ -11,37 +11,53 @@ export function getReceiptBlobPathPrefix(userId: string) {
   return `receipts/${userId}/`;
 }
 
+function getPathname(url: string): string | null {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return null;
+  }
+}
+
 export function userOwnsReceiptBlobUrl(url: string, userId: string) {
-  const prefix = getReceiptBlobPathPrefix(userId);
+  const prefix = `/${getReceiptBlobPathPrefix(userId)}`;
+  const pathname = getPathname(url);
 
-  try {
-    return new URL(url).pathname.includes(prefix);
-  } catch {
-    return url.includes(prefix);
+  if (!pathname) {
+    return false;
   }
+
+  // Segment-safe: must be under /receipts/<userId>/…
+  return pathname === prefix.slice(0, -1) || pathname.startsWith(prefix);
 }
 
-function isReceiptStorageBlobUrl(url: string) {
-  try {
-    return new URL(url).pathname.includes("/receipts/");
-  } catch {
-    return url.includes("/receipts/");
+export function isReceiptStorageBlobUrl(url: string) {
+  const pathname = getPathname(url);
+  if (!pathname) {
+    return false;
   }
+
+  return pathname === "/receipts" || pathname.startsWith("/receipts/");
 }
 
+/**
+ * Reject file parts that are not owned receipt blobs (blocks arbitrary https:// URLs).
+ */
 export function messagesOnlyUseOwnedReceiptBlobs(
   userId: string,
   messages: UIMessage[],
 ): boolean {
   for (const message of messages) {
     for (const part of message.parts) {
-      if (
-        part.type === "file" &&
-        part.url &&
-        isReceiptStorageBlobUrl(part.url) &&
-        !userOwnsReceiptBlobUrl(part.url, userId)
-      ) {
-        return false;
+      if (part.type === "file" && part.url) {
+        // data: / blob: local previews are not persisted blob URLs
+        if (part.url.startsWith("data:") || part.url.startsWith("blob:")) {
+          continue;
+        }
+
+        if (!userOwnsReceiptBlobUrl(part.url, userId)) {
+          return false;
+        }
       }
     }
   }
@@ -150,6 +166,14 @@ export async function prepareMessagesForModel(
             return {
               ...part,
               url: await fetchReceiptBlobAsDataUrl(part.url),
+            };
+          }
+
+          // Drop non-owned / arbitrary remote file parts from model input.
+          if (part.type === "file" && part.url && !part.url.startsWith("data:")) {
+            return {
+              type: "text" as const,
+              text: "[Attached file omitted: not an owned receipt blob.]",
             };
           }
 

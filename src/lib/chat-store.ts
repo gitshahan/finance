@@ -46,6 +46,64 @@ export async function loadMessagesByUser(userId: string): Promise<UIMessage[]> {
   return rows.map((row) => row.message_json);
 }
 
+function restoreMissingServerFileParts(
+  clientMessage: UIMessage,
+  serverMessage: UIMessage,
+): UIMessage {
+  const clientFileUrls = new Set(
+    clientMessage.parts
+      .filter((part) => part.type === "file" && part.url)
+      .map((part) => (part as { url: string }).url),
+  );
+
+  const missingServerFileParts = serverMessage.parts.filter(
+    (part) =>
+      part.type === "file" && part.url && !clientFileUrls.has(part.url),
+  );
+
+  if (missingServerFileParts.length === 0) {
+    return clientMessage;
+  }
+
+  return {
+    ...clientMessage,
+    parts: [...clientMessage.parts, ...missingServerFileParts],
+  };
+}
+
+/**
+ * Merge client messages with server history so a truncated/malicious client
+ * payload cannot drop previously persisted messages or file attachments.
+ */
+export function mergeMessagesPreservingServerHistory(
+  serverMessages: UIMessage[],
+  clientMessages: UIMessage[],
+): UIMessage[] {
+  const clientById = new Map(
+    clientMessages.map((message) => [message.id, message]),
+  );
+  const seen = new Set<string>();
+  const result: UIMessage[] = [];
+
+  for (const serverMessage of serverMessages) {
+    const clientMessage = clientById.get(serverMessage.id);
+    if (clientMessage) {
+      result.push(restoreMissingServerFileParts(clientMessage, serverMessage));
+    } else {
+      result.push(serverMessage);
+    }
+    seen.add(serverMessage.id);
+  }
+
+  for (const clientMessage of clientMessages) {
+    if (!seen.has(clientMessage.id)) {
+      result.push(clientMessage);
+    }
+  }
+
+  return result;
+}
+
 export async function replaceMessagesByUser(
   userId: string,
   messages: UIMessage[],
@@ -53,18 +111,19 @@ export async function replaceMessagesByUser(
   await ensureChatTable();
   const sql = getSqlClient();
   const previousMessages = await loadMessagesByUser(userId);
+  const mergedMessages = mergeMessagesPreservingServerHistory(
+    previousMessages,
+    messages,
+  );
 
-  await sql`BEGIN`;
-
-  try {
-    await sql`
+  const queries = [
+    sql`
       DELETE FROM chat_messages
       WHERE user_id = ${userId}
         AND chat_id = ${CHAT_ID}
-    `;
-
-    for (const [index, message] of messages.entries()) {
-      await sql`
+    `,
+    ...mergedMessages.map(
+      (message, index) => sql`
         INSERT INTO chat_messages (user_id, chat_id, message_id, message_json, created_at)
         VALUES (
           ${userId},
@@ -73,19 +132,16 @@ export async function replaceMessagesByUser(
           ${JSON.stringify(message)}::jsonb,
           NOW() + (${index} * INTERVAL '1 millisecond')
         )
-      `;
-    }
+      `,
+    ),
+  ];
 
-    await sql`COMMIT`;
-  } catch (error) {
-    await sql`ROLLBACK`;
-    throw error;
-  }
+  await sql.transaction(queries);
 
   const previousUrls = new Set(extractReceiptBlobUrls(previousMessages, userId));
-  const nextUrls = new Set(extractReceiptBlobUrls(messages, userId));
+  const nextUrls = new Set(extractReceiptBlobUrls(mergedMessages, userId));
   const orphanedUrls = [...previousUrls].filter((url) => !nextUrls.has(url));
 
-  await deleteOrphanedReceiptBlobs(userId, previousMessages, messages);
+  await deleteOrphanedReceiptBlobs(userId, previousMessages, mergedMessages);
   await deleteSharedReceiptsByImageUrls(userId, orphanedUrls);
 }

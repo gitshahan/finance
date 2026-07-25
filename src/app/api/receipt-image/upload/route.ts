@@ -2,8 +2,9 @@ import { auth } from "@clerk/nextjs/server";
 import { put } from "@vercel/blob";
 import { getReceiptBlobPathPrefix } from "@/lib/receipt-blob";
 import {
+  getAllowedUploadExtension,
+  getForcedUploadContentType,
   getReceiptUploadSizeLimitError,
-  guessReceiptUploadContentType,
   isSupportedReceiptUpload,
 } from "@/lib/receipt-image-url";
 
@@ -43,8 +44,16 @@ export async function POST(request: Request) {
       return new Response(sizeLimitError, { status: 400 });
     }
 
-    const contentType = file.type || guessReceiptUploadContentType(file.name);
-    const fileExtension = file.name.split(".").pop() || "bin";
+    const fileExtension = getAllowedUploadExtension(file.name);
+    const contentType = getForcedUploadContentType(file.name);
+
+    if (!fileExtension || !contentType) {
+      return new Response(
+        "Only image files (JPEG, PNG, WebP, etc.) and CSV files are supported.",
+        { status: 400 },
+      );
+    }
+
     const blobPath = `${getReceiptBlobPathPrefix(userId)}${crypto.randomUUID()}.${fileExtension}`;
 
     const uploaded = await put(blobPath, file, {

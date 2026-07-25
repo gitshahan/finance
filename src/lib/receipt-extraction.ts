@@ -12,6 +12,7 @@ import {
   insertSharedReceipt,
   type InsertSharedReceiptInput,
 } from "@/lib/shared-data-store";
+import { addUserTokenUsage } from "@/lib/token-usage-store";
 
 const receiptExtractionSchema = z.object({
   isReceipt: z.boolean(),
@@ -108,9 +109,10 @@ function toInsertInput(
 }
 
 export async function extractReceiptFromImage(
+  userId: string,
   imageDataUrl: string,
 ): Promise<ReceiptExtraction> {
-  const { object } = await generateObject({
+  const { object, usage } = await generateObject({
     model: CHAT_MODEL,
     schema: zodSchema(receiptExtractionSchema),
     maxOutputTokens: 800,
@@ -129,6 +131,12 @@ export async function extractReceiptFromImage(
         ],
       },
     ],
+  });
+
+  await addUserTokenUsage(userId, {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    totalTokens: usage.totalTokens,
   });
 
   return object;
@@ -153,7 +161,7 @@ export async function syncNewReceiptsFromMessages(
 
     try {
       const imageDataUrl = await fetchReceiptBlobAsDataUrl(imageUrl);
-      const extraction = await extractReceiptFromImage(imageDataUrl);
+      const extraction = await extractReceiptFromImage(userId, imageDataUrl);
       const messageId = findMessageIdForImageUrl(messages, imageUrl);
 
       await insertSharedReceipt(

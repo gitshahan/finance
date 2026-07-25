@@ -30,7 +30,7 @@ export function ReceiptImageButton({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,.csv,text/csv"
+        accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.csv,text/csv"
         capture="environment"
         className="hidden"
         disabled={isDisabled}
