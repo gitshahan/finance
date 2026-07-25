@@ -2,10 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import {
   convertToModelMessages,
   createIdGenerator,
+  gateway,
   stepCountIs,
   streamText,
   type UIMessage,
 } from "ai";
+import { after } from "next/server";
 import {
   DEFAULT_CHAT_ID,
   isChatPersistenceConfigured,
@@ -185,11 +187,21 @@ export async function POST(request: Request) {
       model: CHAT_MODEL,
       system,
       messages: modelMessages,
-      tools: createChatTools({ userId, messages }),
-      // Keep tool loops short — initial CSV analysis should be a single text reply.
-      stopWhen: stepCountIs(4),
+      tools: {
+        ...createChatTools({ userId, messages }),
+        // Live web lookup for merchant plans/pricing (works with any gateway model).
+        web_search: gateway.tools.perplexitySearch({
+          maxResults: 6,
+          searchLanguageFilter: ["en"],
+          searchRecencyFilter: "month",
+        }),
+      },
+      // Allow search + answer (and short receipt tool loops).
+      stopWhen: stepCountIs(6),
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
-      onFinish: async ({ totalUsage }) => {
+      onFinish: ({ totalUsage }) => {
+        // Don't await DB work here — AI SDK holds the stream open until onFinish
+        // resolves, which leaves the client send button stuck in "streaming".
         const chatUsage: TokenReservation = {
           inputTokens: totalUsage.inputTokens ?? 0,
           outputTokens: totalUsage.outputTokens ?? 0,
@@ -197,7 +209,13 @@ export async function POST(request: Request) {
             totalUsage.totalTokens ??
             (totalUsage.inputTokens ?? 0) + (totalUsage.outputTokens ?? 0),
         };
-        await reconcileReservedTokenUsage(userId, reservation, chatUsage);
+        after(async () => {
+          try {
+            await reconcileReservedTokenUsage(userId, reservation, chatUsage);
+          } catch (error) {
+            console.error("Failed to reconcile token usage:", error);
+          }
+        });
       },
     });
 
@@ -207,22 +225,31 @@ export async function POST(request: Request) {
         prefix: "msg",
         size: 16,
       }),
-      onFinish: async ({ messages: completedMessages }) => {
-        if (isChatPersistenceConfigured()) {
-          const syncResult = await syncNewReceiptsFromMessages(
-            userId,
-            completedMessages,
-            { maxNewExtractions: MAX_NEW_EXTRACTIONS_PER_REQUEST },
-          );
-          // Extractions were not in the chat reservation; bill them separately.
-          if (syncResult.extractedCount > 0) {
-            await addUserTokenUsage(userId, {
-              ...syncResult.usage,
-              skipRequestIncrement: true,
-            });
-          }
-          await replaceMessagesByUser(userId, completedMessages, chatId);
+      onFinish: ({ messages: completedMessages }) => {
+        if (!isChatPersistenceConfigured()) {
+          return;
         }
+
+        // Persist after the UI stream closes so status returns to ready promptly.
+        after(async () => {
+          try {
+            const syncResult = await syncNewReceiptsFromMessages(
+              userId,
+              completedMessages,
+              { maxNewExtractions: MAX_NEW_EXTRACTIONS_PER_REQUEST },
+            );
+            // Extractions were not in the chat reservation; bill them separately.
+            if (syncResult.extractedCount > 0) {
+              await addUserTokenUsage(userId, {
+                ...syncResult.usage,
+                skipRequestIncrement: true,
+              });
+            }
+            await replaceMessagesByUser(userId, completedMessages, chatId);
+          } catch (error) {
+            console.error("Failed to persist chat messages:", error);
+          }
+        });
       },
     });
   } catch (error) {

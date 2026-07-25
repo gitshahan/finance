@@ -70,6 +70,7 @@ export function ChatInterface({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const didInitialScrollRef = useRef(false);
+  const stickToBottomRef = useRef(true);
   const { messages, sendMessage, status, error } = useChat({
     id: chatId,
     messages: initialMessages,
@@ -119,13 +120,26 @@ export function ChatInterface({
 
   function scrollToBottom(behavior: ScrollBehavior = "smooth") {
     const container = messagesContainerRef.current;
-
-    if (container && behavior === "auto") {
-      container.scrollTop = container.scrollHeight;
+    if (!container) {
       return;
     }
 
-    messagesEndRef.current?.scrollIntoView({ behavior });
+    // Scroll the messages pane directly — scrollIntoView can target the wrong ancestor.
+    if (behavior === "smooth") {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function pinToBottom() {
+    stickToBottomRef.current = true;
+    scrollToBottom("auto");
+    requestAnimationFrame(() => {
+      scrollToBottom("auto");
+      updateScrollToBottomVisibility();
+    });
   }
 
   function clearAttachment() {
@@ -149,6 +163,7 @@ export function ChatInterface({
     // look stuck on "CSV attached" while the model/tools run.
     setInput("");
     clearAttachment();
+    pinToBottom();
 
     try {
       await sendMessage({
@@ -251,6 +266,7 @@ export function ChatInterface({
     const files = uploadedReceipt ? [uploadedReceipt] : undefined;
     setInput("");
     clearAttachment();
+    pinToBottom();
 
     try {
       await sendMessage({
@@ -375,15 +391,12 @@ export function ChatInterface({
 
     if (!didInitialScrollRef.current && messages.length > 0) {
       didInitialScrollRef.current = true;
-      scrollToBottom("auto");
-      requestAnimationFrame(() => {
-        scrollToBottom("auto");
-        updateScrollToBottomVisibility();
-      });
+      pinToBottom();
       return;
     }
 
-    if (isNearBottom(container) || messages.length <= 1) {
+    // Follow new content while stuck to bottom (pinned when the user sends).
+    if (stickToBottomRef.current) {
       scrollToBottom(isSending ? "auto" : "smooth");
     }
 
@@ -397,10 +410,16 @@ export function ChatInterface({
       return;
     }
 
-    const handleScroll = () => updateScrollToBottomVisibility();
+    const handleScroll = () => {
+      stickToBottomRef.current = isNearBottom(container);
+      updateScrollToBottomVisibility();
+    };
     container.addEventListener("scroll", handleScroll, { passive: true });
 
     const resizeObserver = new ResizeObserver(() => {
+      if (stickToBottomRef.current) {
+        scrollToBottom("auto");
+      }
       updateScrollToBottomVisibility();
     });
     resizeObserver.observe(container);
@@ -538,80 +557,81 @@ export function ChatInterface({
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface">
       <div className="relative min-h-0 flex-1">
         <div
           ref={messagesContainerRef}
-          className="h-full space-y-4 overflow-y-auto p-6"
+          className="h-full overflow-y-auto px-4 py-6 sm:px-6"
         >
-          {!usageTrackingEnabled ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-              Chat is disabled because DATABASE_URL is not configured. Usage
-              quotas must be enforceable before the assistant can run.
-            </div>
-          ) : !chatPersistenceEnabled ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-              Chat history could not be loaded. New messages may not persist.
-            </div>
-          ) : null}
+          <div className="w-full space-y-4">
+            {!usageTrackingEnabled ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+                Chat is disabled because DATABASE_URL is not configured. Usage
+                quotas must be enforceable before the assistant can run.
+              </div>
+            ) : !chatPersistenceEnabled ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+                Chat history could not be loaded. New messages may not persist.
+              </div>
+            ) : null}
 
-          {tokenUsage?.isQuotaExceeded ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-              <p className="font-medium">
-                Usage limit reached for this account. Please contact support to
-                extend your quota.
-              </p>
-            </div>
-          ) : null}
+            {tokenUsage?.isQuotaExceeded ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+                <p className="font-medium">
+                  Usage limit reached for this account. Please contact support to
+                  extend your quota.
+                </p>
+              </div>
+            ) : null}
 
-          {uploadError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-              {uploadError}
-            </div>
-          ) : null}
+            {uploadError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+                {uploadError}
+              </div>
+            ) : null}
 
-          {error ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-              {error.message ||
-                "Could not get a reply. Please check your configuration and try again."}
-            </div>
-          ) : null}
+            {error ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+                {error.message ||
+                  "Could not get a reply. Please check your configuration and try again."}
+              </div>
+            ) : null}
 
-          {messages.map((message, messageIndex) => {
-            const isLastMessage = messageIndex === messages.length - 1;
-            const isAssistantLoading =
-              isSending && isLastMessage && message.role === "assistant";
+            {messages.map((message, messageIndex) => {
+              const isLastMessage = messageIndex === messages.length - 1;
+              const isAssistantLoading =
+                isSending && isLastMessage && message.role === "assistant";
+              const isUser = message.role === "user";
 
-            return (
-              <div
-                key={message.id}
-                className={`flex ${
-                  message.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
+              return (
                 <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight ${
-                    message.role === "user"
-                      ? "bg-brand font-medium text-white"
-                      : "bg-surface-muted text-foreground"
-                  }`}
+                  key={message.id}
+                  className={`flex ${isUser ? "justify-end" : "justify-start"}`}
                 >
-                  <ChatMessageContent
-                    message={message}
-                    isLoading={isAssistantLoading}
-                  />
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight ${
+                      isUser
+                        ? "max-w-[min(100%,42rem)] bg-brand font-medium text-white"
+                        : "w-full max-w-none bg-surface-muted text-foreground"
+                    }`}
+                  >
+                    <ChatMessageContent
+                      message={message}
+                      isLoading={isAssistantLoading}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+            {isSending && messages.at(-1)?.role === "user" ? (
+              <div className="flex justify-start">
+                <div className="w-full rounded-2xl bg-surface-muted px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight text-muted">
+                  Working on your request…
                 </div>
               </div>
-            );
-          })}
-          {isSending && messages.at(-1)?.role === "user" ? (
-            <div className="flex justify-start">
-              <div className="max-w-[80%] rounded-2xl bg-surface-muted px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight text-muted">
-                Working on your request…
-              </div>
-            </div>
-          ) : null}
-          <div ref={messagesEndRef} />
+            ) : null}
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {showScrollToBottom ? (
@@ -639,7 +659,7 @@ export function ChatInterface({
       </div>
 
       <form
-        className={`shrink-0 border-t p-4 transition ${
+        className={`shrink-0 border-t px-4 py-4 transition sm:px-6 ${
           isFileDragOver
             ? "border-brand-accent bg-brand-soft/60"
             : "border-border"
@@ -652,6 +672,7 @@ export function ChatInterface({
           void sendCurrentMessage();
         }}
       >
+        <div className="w-full">
         {hasAttachment ? (
           <div
             className={`mb-3 flex items-start gap-3 rounded-xl border p-3 ${
@@ -740,34 +761,32 @@ export function ChatInterface({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 min-w-0 flex-1 items-center gap-1 rounded-xl border border-border bg-surface px-1.5 transition focus-within:ring-2 focus-within:ring-brand-ring">
-            <ReceiptImageButton
-              ref={attachButtonRef}
-              variant="inline"
-              disabled={isSending || !usageTrackingEnabled}
-              uploading={isUploadingReceipt}
-              progress={uploadProgress}
-              onSelect={(file) => void handleReceiptSelect(file)}
-            />
-            <textarea
-              ref={inputRef}
-              autoFocus
-              rows={1}
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onBlur={handleInputBlur}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void sendCurrentMessage();
-                }
-              }}
-              placeholder="Ask about your CSV or saved receipts..."
-              className="h-full min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1.5 py-2.5 text-[0.9375rem] tracking-tight outline-none placeholder:text-muted"
-              disabled={isSending || !usageTrackingEnabled}
-            />
-          </div>
+        <div className="flex h-12 min-w-0 items-center gap-1 rounded-xl border border-border bg-surface px-1.5 transition focus-within:ring-2 focus-within:ring-brand-ring">
+          <ReceiptImageButton
+            ref={attachButtonRef}
+            variant="inline"
+            disabled={isSending || !usageTrackingEnabled}
+            uploading={isUploadingReceipt}
+            progress={uploadProgress}
+            onSelect={(file) => void handleReceiptSelect(file)}
+          />
+          <textarea
+            ref={inputRef}
+            autoFocus
+            rows={1}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onBlur={handleInputBlur}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void sendCurrentMessage();
+              }
+            }}
+            placeholder="Ask about your CSV or saved receipts..."
+            className="h-full min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1.5 py-2.5 text-[0.9375rem] tracking-tight outline-none placeholder:text-muted"
+            disabled={isSending || !usageTrackingEnabled}
+          />
           <button
             type="submit"
             disabled={
@@ -776,10 +795,42 @@ export function ChatInterface({
               !usageTrackingEnabled ||
               Boolean(tokenUsage?.isQuotaExceeded)
             }
-            className="h-12 cursor-pointer rounded-xl bg-brand px-4 text-sm font-semibold tracking-tight text-white transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={isSending ? "Sending" : "Send message"}
+            title={isSending ? "Sending…" : "Send"}
+            className="mr-0.5 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-brand text-white transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSending ? "Sending..." : "Send"}
+            {isSending ? (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4 animate-spin"
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4"
+                aria-hidden="true"
+              >
+                <path d="M12 19V5" />
+                <path d="m5 12 7-7 7 7" />
+              </svg>
+            )}
           </button>
+        </div>
         </div>
       </form>
     </section>
