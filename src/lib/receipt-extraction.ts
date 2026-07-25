@@ -7,6 +7,7 @@ import {
   fetchReceiptBlobAsDataUrl,
 } from "@/lib/receipt-blob";
 import { isCsvFilename } from "@/lib/receipt-image-url";
+import { syncCsvReceiptsFromMessages } from "@/lib/csv-receipt-index";
 import {
   getSharedReceiptByImageUrl,
   insertSharedReceipt,
@@ -93,6 +94,8 @@ function toInsertInput(
     userId,
     messageId,
     imageUrl,
+    sourceType: "image",
+    sourceUrl: imageUrl,
     isReceipt: extraction.isReceipt,
     merchant: extraction.merchant,
     receiptDate: parseReceiptDate(extraction.receiptDate),
@@ -170,6 +173,7 @@ export async function extractReceiptFromImage(
 
 export type SyncNewReceiptsResult = {
   extractedCount: number;
+  csvIndexedCount: number;
   usage: TokenReservation;
 };
 
@@ -217,5 +221,11 @@ export async function syncNewReceiptsFromMessages(
     }
   }
 
-  return { extractedCount, usage };
+  const csvSync = await syncCsvReceiptsFromMessages(userId, messages);
+
+  return {
+    extractedCount,
+    csvIndexedCount: csvSync.indexedCount,
+    usage,
+  };
 }

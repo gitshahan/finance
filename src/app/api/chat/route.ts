@@ -7,7 +7,9 @@ import {
   type UIMessage,
 } from "ai";
 import {
+  DEFAULT_CHAT_ID,
   isChatPersistenceConfigured,
+  isValidChatId,
   replaceMessagesByUser,
 } from "@/lib/chat-store";
 import { buildChatSystemPrompt } from "@/lib/chat-context";
@@ -42,6 +44,7 @@ const CHAT_MAX_OUTPUT_TOKENS = 1500;
 type ChatRequestBody = {
   messages: UIMessage[];
   userId?: string;
+  chatId?: string;
 };
 
 function isValidChatMessages(messages: unknown): messages is UIMessage[] {
@@ -104,6 +107,14 @@ export async function POST(request: Request) {
     }
 
     const { messages } = body;
+    const chatId =
+      typeof body.chatId === "string" && body.chatId.trim()
+        ? body.chatId.trim()
+        : DEFAULT_CHAT_ID;
+
+    if (!isValidChatId(chatId)) {
+      return new Response("Invalid chat id.", { status: 400 });
+    }
 
     if (!isValidChatMessages(messages)) {
       return new Response("Invalid or oversized chat payload.", { status: 400 });
@@ -173,7 +184,7 @@ export async function POST(request: Request) {
       system,
       messages: modelMessages,
       tools: createChatTools({ userId, messages }),
-      stopWhen: stepCountIs(5),
+      stopWhen: stepCountIs(8),
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       onFinish: async ({ totalUsage }) => {
         const chatUsage: TokenReservation = {
@@ -213,7 +224,7 @@ export async function POST(request: Request) {
               });
             }
           }
-          await replaceMessagesByUser(userId, completedMessages);
+          await replaceMessagesByUser(userId, completedMessages, chatId);
         }
       },
     });

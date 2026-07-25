@@ -1,7 +1,7 @@
 import {
-  formatSharedReceiptsForPrompt,
+  formatReceiptIndexSummaryForPrompt,
+  getSharedReceiptIndexSummary,
   isSharedDataConfigured,
-  listSharedReceiptsForUser,
 } from "@/lib/shared-data-store";
 import { buildReceiptAssistantSystemPrompt } from "@/lib/receipt-assistant-prompt";
 
@@ -10,8 +10,8 @@ export async function buildChatSystemPrompt(userId: string) {
     return buildReceiptAssistantSystemPrompt(null);
   }
 
-  const receipts = await listSharedReceiptsForUser(userId, { limit: 40 });
-  const savedReceiptsContext = formatSharedReceiptsForPrompt(receipts);
+  const summary = await getSharedReceiptIndexSummary(userId);
+  const savedReceiptsContext = formatReceiptIndexSummaryForPrompt(summary);
 
   return buildReceiptAssistantSystemPrompt(savedReceiptsContext);
 }

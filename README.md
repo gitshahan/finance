@@ -1,6 +1,6 @@
 # Finance Chat
 
-A Next.js app where signed-in users chat with an AI assistant scoped to **payment receipts and data they have shared** (images, CSV attachments, and indexed receipt records). Built for a time-boxed technical assessment; the sections below document approach, trade-offs, and scoping—not only how to run the app.
+A Next.js app where signed-in users chat with an AI assistant scoped to **payment receipts and data they have shared** (images, CSV attachments, and indexed receipt records). Chat-first product surface: searchable receipt memory, spend summaries, corrections, multi-conversation threads, and CSV export via tools.
 
 ## Getting started
 
@@ -10,6 +10,11 @@ pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Unauthenticated visitors are sent to sign-in; after auth you land on `/dashboard`.
+
+```bash
+pnpm test   # unit tests
+pnpm build  # production build
+```
 
 ### Environment variables
 
@@ -42,64 +47,44 @@ In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`
 
 ---
 
-## Documentation (assessment write-up)
-
-### Features / tasks covered
+## Features
 
 | Area | Status | Notes |
 |------|--------|--------|
-| **Authentication** | Done | Clerk sign-in/sign-up, `proxy.ts` route protection, `/sso-callback` for OAuth same-window redirect |
-| **Receipt-focused chat** | Done | Streaming chat via Vercel AI SDK; system prompt limits scope to shared receipt data |
-| **Image uploads** | Done | JPEG/PNG/WebP/etc. → private Vercel Blob under per-user paths; 5MB limit; upload on attach with progress |
-| **CSV attachments** | Done | 1MB limit; parsed in-chat; assistant summarizes and answers from file content |
-| **Secure file access** | Done | Blob URLs validated per user; `/api/receipt-image` proxy for model/history; 403 if messages reference another user’s blobs |
+| **Authentication** | Done | Clerk sign-in/sign-up, `proxy.ts` route protection, `/sso-callback` for OAuth |
+| **Receipt-focused chat** | Done | Streaming chat via Vercel AI SDK; tools for search, spend, export, corrections |
+| **Multi-conversation** | Done | `chat_threads` + `chat_id`; switcher on dashboard; receipt index is account-wide |
+| **Image uploads** | Done | Private Vercel Blob under per-user paths; 5MB limit; upload on attach with progress |
+| **CSV attachments** | Done | 1MB limit; parsed in-chat; rows indexed into shared memory with dedupe |
+| **Secure file access** | Done | Blob URLs validated per user; `/api/receipt-image` proxy; 403 on foreign blobs |
 | **Chat persistence** | Done | `chat_messages` in Neon; full thread replaced after each completed turn |
-| **Receipt indexing** | Done (images) | On sync, vision + `generateObject` extracts merchant, date, amount, etc. into `user_shared_receipts`; injected into system prompt (up to 100 rows) |
-| **Cross-session memory** | Done | Follow-ups can use receipts shared in earlier sessions when `DATABASE_URL` is set |
-| **CSV export (in chat)** | Done | `generateCsvDownload` tool: server-side filter of attached CSVs (≤200 rows) or tiny inline exports (≤30 rows); download button in UI |
-| **CSV export (saved receipts API)** | Backend only | `GET /api/receipts` and `GET /api/receipts/export` with filters and 200-row cap; **no dashboard UI** (tab removed to prioritize chat) |
-| **Token / usage quota** | Done | Per-user totals in Neon; dashboard progress bar; 429 when total/output token caps hit |
-| **Assistant HTML rendering** | Done | Model instructed to reply in HTML; sanitized with DOMPurify |
-| **Resilience** | Done | Dashboard loads if DB missing; persistence disabled with user-visible notice |
+| **Receipt indexing** | Done | Images via vision + `generateObject`; CSV rows via column mapping; categories |
+| **Queryable memory** | Done | `searchSavedReceipts` / `summarizeSpend` tools; short index summary in system prompt |
+| **Corrections** | Done | `confirmSavedReceipt`, `updateSavedReceipt`, `deleteSavedReceipt`, `setMerchantCategory` |
+| **CSV export** | Done | From attachments, saved index (`filterFromSavedReceipts`), or tiny inline tables |
+| **Spend insights UI** | Done | `summarizeSpend` tool results render as an in-chat table with bar hints |
+| **Token / usage quota** | Done | Per-user totals in Neon; dashboard progress bar; 429 when caps hit |
+| **Assistant HTML rendering** | Done | Model replies in HTML; sanitized with DOMPurify |
 
-### Architectural and technical decisions
+### Architectural notes
 
-- **Next.js 16 App Router** — Server Components for dashboard bootstrap (load history + quota); client chat via `@ai-sdk/react` and `DefaultChatTransport` to `/api/chat`.
-- **Clerk** — Fast, assessment-friendly auth; `clerkMiddleware` in `src/proxy.ts` protects `/dashboard` and receipt/chat APIs.
-- **Vercel AI Gateway + AI SDK** — Single `CHAT_MODEL` env default (`openai/gpt-5.4-nano`) with vision for receipt images; `streamText` + tools for CSV downloads.
-- **Neon (serverless Postgres)** — One database for chat JSON, receipt index, and token usage; tables created on demand with `CREATE TABLE IF NOT EXISTS` to avoid a separate migration step in the assessment window.
-- **Vercel Blob (private)** — Files are not public; the app never sends raw blob URLs to the model for persisted history—blobs are re-fetched server-side and inlined as data URLs or text when needed (`prepareMessagesForModel`).
-- **Receipt index separate from chat** — Structured rows power historical Q&A without re-sending every image each turn; extraction runs once per new image URL.
-- **Tool-based CSV export** — The model must call `generateCsvDownload` instead of fabricating large tables in HTML; attachment exports filter on the server (`filterFromAttachments`) so row data is not passed through the tool argument payload.
-- **Scoped assistant** — `receipt-assistant-prompt.ts` refuses general finance advice and grounds answers in shared data only.
+- **Next.js 16 App Router** — Server Components bootstrap dashboard (history + quota + threads); client chat via `@ai-sdk/react`.
+- **Receipt index separate from chat** — Structured rows power historical Q&A; tools query Neon instead of stuffing dozens of rows into the prompt.
+- **Account-wide memory** — Deleting a chat thread does not wipe indexed receipts; explicit `deleteSavedReceipt` does.
+- **Scoped assistant** — Refuses general finance advice; grounds answers in shared data and tool results only.
 
-### Assumptions, trade-offs, and limitations
+### Limits
 
-- **Single chat thread per user** — `chat_id` is fixed to `"default"`; no multi-conversation UI.
-- **CSV files are not indexed** — Only receipt **images** are written to `user_shared_receipts`; CSV data lives in the message thread and attachment export path.
-- **Extraction quality** — Depends on model vision/OCR; blurry or cropped receipts may yield null fields; the prompt tells the model not to guess.
-- **Export caps** — At most **200** rows per export (chat tool or API); chat tool may truncate and should inform the user.
-- **API export without UI** — Filtered export of saved receipts requires calling `/api/receipts/export` manually (or re-adding a tab); product flow is export **via chat** (e.g. “export my Netflix rows from the CSV I uploaded”).
-- **Quota model** — Limits (1M total tokens, 286k output tokens, 550 requests) are enforced together. Chat requires `DATABASE_URL` so quotas can fail closed; each request pre-debits an estimated token budget (plus capped receipt extractions) and reconciles to actual usage when the model finishes.
-- **No automated tests** — Manual verification only within the time box.
-- **English-first** — Receipt text and UI copy assume English; no i18n.
+- Export caps at **200** rows; search tool returns up to **50**.
+- Vision extraction capped at **2** new images per chat request.
+- CSV indexing: up to **2** files / **200** rows per request; dedupes against existing merchant+date+amount.
+- Quota model: 1M total tokens / 286k output / 550 requests; chat requires `DATABASE_URL`.
 
 ### Intentional omissions
 
-- **“Receipts & export” dashboard tab** — Removed in favor of a chat-only dashboard; list/export APIs remain for possible reuse or API clients.
-- **Admin / support tools** — No quota override UI; “contact support” copy only.
-- **Receipt deletion UI** — Orphan blob cleanup runs when messages are rewritten; no user-facing delete.
-- **Real-time multi-device sync** — History loads on page load; no live sync across tabs.
-- **Billing, teams, or orgs** — Single-user Clerk accounts only.
-- **Comprehensive CSV schema validation** — Lightweight parser; malformed files are handled best-effort in prompts.
-
-### Challenges faced
-
-1. **OAuth redirect loop / blank dashboard** — Clerk redirect URLs and a dedicated `/sso-callback` route were aligned with `AUTH_COMPLETE_URL` so Google sign-in lands on a loaded dashboard.
-2. **Persisted chat without breaking local dev** — Missing or invalid `DATABASE_URL` previously broke the dashboard; load paths now catch errors and fall back to session-only chat with a clear banner.
-3. **Private blobs in persisted messages** — Stored messages keep blob URLs; the server re-reads owned blobs per request and checks `messagesOnlyUseOwnedReceiptBlobs` to prevent cross-user URL injection.
-4. **CSV export reliability** — Early exports tried to pass hundreds of rows through the tool call; moving filtering to the server (`chat-csv-filter-export.ts`) fixed timeouts and hallucinated rows.
-5. **Scope vs. time** — A full receipts browser was dropped so effort stayed on core chat, indexing, and in-conversation export—the main assessment narrative.
+- Full receipts browser dashboard tab (APIs remain; product path is chat tools)
+- Billing, teams / orgs, admin quota overrides
+- Real-time multi-tab sync (history loads on navigation)
 
 ---
 
@@ -107,11 +92,11 @@ In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`
 
 ```
 src/app/api/chat/          # Streaming assistant + persistence
+src/app/api/chats/         # List/create/rename/delete conversations
 src/app/api/receipt-image/ # Upload + authenticated blob proxy
-src/app/api/receipts/      # List/filter saved receipts (JSON)
-src/app/api/receipts/export/  # Filtered CSV download (API)
-src/components/            # Chat UI, quota bar, message rendering
-src/lib/                   # DB, blobs, extraction, tools, prompts
+src/app/api/receipts/      # List/filter saved receipts (JSON + CSV export)
+src/components/            # Chat UI, thread switcher, spend summary, quota bar
+src/lib/                   # DB, blobs, extraction, CSV index, tools, prompts
 src/proxy.ts               # Clerk middleware (protected routes)
 ```
 

@@ -2,8 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import type { UIMessage } from "ai";
 import { DashboardShell } from "@/components/dashboard-shell";
 import {
+  DEFAULT_CHAT_ID,
   isChatPersistenceConfigured,
+  isValidChatId,
+  listChatsByUser,
   loadMessagesByUser,
+  type ChatThread,
 } from "@/lib/chat-store";
 import {
   getUserTokenUsage,
@@ -11,18 +15,40 @@ import {
   type UserTokenUsage,
 } from "@/lib/token-usage-store";
 
-export default async function DashboardPage() {
+type DashboardPageProps = {
+  searchParams: Promise<{ chat?: string }>;
+};
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const { userId } = await auth();
+  const params = await searchParams;
+  const requestedChatId =
+    typeof params.chat === "string" && isValidChatId(params.chat)
+      ? params.chat
+      : DEFAULT_CHAT_ID;
+
   const usageTrackingEnabled = isTokenUsageConfigured();
   let chatPersistenceEnabled = isChatPersistenceConfigured();
   let initialMessages: UIMessage[] = [];
+  let initialChats: ChatThread[] = [
+    {
+      chatId: DEFAULT_CHAT_ID,
+      title: "New chat",
+      updatedAt: new Date(0).toISOString(),
+    },
+  ];
+  let activeChatId = requestedChatId;
   let tokenUsage: UserTokenUsage | null = null;
 
   if (userId && chatPersistenceEnabled) {
     try {
-      initialMessages = await loadMessagesByUser(userId);
+      initialChats = await listChatsByUser(userId);
+      const knownIds = new Set(initialChats.map((chat) => chat.chatId));
+      activeChatId = knownIds.has(requestedChatId)
+        ? requestedChatId
+        : DEFAULT_CHAT_ID;
+      initialMessages = await loadMessagesByUser(userId, activeChatId);
     } catch (error) {
-      // Keep the dashboard usable even when persistence is misconfigured or unavailable.
       chatPersistenceEnabled = false;
       console.error("Failed to load persisted chat messages:", error);
     }
@@ -41,6 +67,8 @@ export default async function DashboardPage() {
       <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col overflow-hidden">
         <DashboardShell
           initialMessages={initialMessages}
+          initialChats={initialChats}
+          activeChatId={activeChatId}
           chatPersistenceEnabled={chatPersistenceEnabled}
           usageTrackingEnabled={usageTrackingEnabled}
           initialTokenUsage={tokenUsage}

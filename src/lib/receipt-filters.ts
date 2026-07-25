@@ -1,6 +1,7 @@
 export type ReceiptListFilters = {
   search?: string;
   merchant?: string;
+  category?: string;
   dateFrom?: string;
   dateTo?: string;
   receiptsOnly?: boolean;
@@ -15,6 +16,7 @@ export function parseReceiptFilters(
 ): ReceiptListFilters {
   const search = searchParams.get("search")?.trim() || undefined;
   const merchant = searchParams.get("merchant")?.trim() || undefined;
+  const category = searchParams.get("category")?.trim() || undefined;
   const dateFrom = searchParams.get("from")?.trim() || undefined;
   const dateTo = searchParams.get("to")?.trim() || undefined;
   const receiptsOnlyParam = searchParams.get("receiptsOnly");
@@ -33,6 +35,7 @@ export function parseReceiptFilters(
   return {
     search,
     merchant,
+    category,
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
     receiptsOnly,
@@ -51,6 +54,10 @@ export function receiptFiltersToSearchParams(
 
   if (filters.merchant) {
     params.set("merchant", filters.merchant);
+  }
+
+  if (filters.category) {
+    params.set("category", filters.category);
   }
 
   if (filters.dateFrom) {
@@ -99,6 +106,7 @@ export function hasActiveExportFilter(filters: ReceiptListFilters): boolean {
   return Boolean(
     filters.search?.trim() ||
       filters.merchant?.trim() ||
+      filters.category?.trim() ||
       filters.dateFrom?.trim() ||
       filters.dateTo?.trim(),
   );
@@ -117,7 +125,7 @@ export function validateReceiptExport(
     return {
       allowed: false,
       message:
-        "Add at least one filter (search, merchant, or date range), then apply filters before exporting.",
+        "Add at least one filter (search, merchant, category, or date range), then apply filters before exporting.",
     };
   }
 

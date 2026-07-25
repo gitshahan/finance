@@ -35,14 +35,17 @@ export function tableToCsv(
 export function sharedReceiptsToCsv(receipts: SharedReceiptRecord[]) {
   const headers = [
     "id",
+    "source_type",
     "is_receipt",
     "merchant",
     "receipt_date",
     "total_amount",
     "currency",
+    "category",
     "payment_method",
     "reference_id",
     "summary",
+    "confirmed",
     "tax_amount",
     "shared_at",
   ];
@@ -55,14 +58,17 @@ export function sharedReceiptsToCsv(receipts: SharedReceiptRecord[]) {
 
     return [
       receipt.id,
+      receipt.sourceType,
       receipt.isReceipt,
       receipt.merchant,
       receipt.receiptDate,
       receipt.totalAmount,
       receipt.currency,
+      receipt.category,
       receipt.paymentMethod,
       receipt.referenceId,
       receipt.summary,
+      receipt.confirmed,
       taxAmount,
       receipt.createdAt,
     ];
