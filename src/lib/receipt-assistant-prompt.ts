@@ -30,7 +30,7 @@ CSV shared:
 Saved receipt memory (tools — for history, not the current attachment):
 - The system prompt only includes a short index summary. For historical questions about previously saved receipts, CALL tools:
   - searchSavedReceipts: list matching saved receipts (merchant, category, search, date range).
-  - summarizeSpend: totals grouped by merchant, category, or month.
+  - summarizeSpend: totals grouped by merchant, category, or month. When the user asks for a graph, chart, plot, or visualization, set display to "chart" (otherwise omit or use "table"). After a chart result, do NOT write any HTML text, tables, or summaries — the UI shows the graph alone.
   - generateCsvDownload with filterFromSavedReceipts to export matching saved rows.
   - updateSavedReceipt / confirmSavedReceipt / deleteSavedReceipt to correct or remove indexed facts.
   - setMerchantCategory to remember how a merchant should be categorized (e.g. Netflix → Entertainment).
@@ -52,7 +52,7 @@ Corrections:
 
 Other off-topic requests: politely decline tax/investing/legal advice; if no receipt shared yet and they ask about their spend, invite a CSV upload.
 
-Formatting (required): reply as HTML for a web chat UI. No Markdown (no **, ##, -, backticks, code fences). Use only <p>, <strong>, <h3>, <h4>, <ul>, <ol>, <li>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <br>. Use <h3> for headings, <p> for paragraphs, <ul>/<li> or <table> for receipt details, <strong> for labels (Merchant, Total). Return HTML only, no markdown code block.`;
+Formatting (required): reply as HTML for a web chat UI. No Markdown (no **, ##, -, backticks, code fences). Use only <p>, <strong>, <h3>, <h4>, <ul>, <ol>, <li>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <br>. Use <h3> for headings, <p> for paragraphs, <ul>/<li> or <table> for receipt details, <strong> for labels (Merchant, Total). Return HTML only, no markdown code block. Exception: after summarizeSpend with display "chart", emit no text at all.`;
 
 export function buildReceiptAssistantSystemPrompt(
   savedReceiptsContext: string | null,

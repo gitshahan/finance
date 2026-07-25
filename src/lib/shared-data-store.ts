@@ -695,6 +695,7 @@ export async function setMerchantCategoryForUser(
 }
 
 export type SpendGroupBy = "merchant" | "category" | "month";
+export type SpendDisplay = "table" | "chart";
 
 export type SpendSummaryBucket = {
   key: string;
@@ -706,6 +707,8 @@ export type SpendSummaryBucket = {
 
 export type SpendSummaryResult = {
   groupBy: SpendGroupBy;
+  /** Omitted on older persisted tool results; treat as table. */
+  display?: SpendDisplay;
   buckets: SpendSummaryBucket[];
   receiptCount: number;
   totalAmount: number | null;
@@ -717,10 +720,12 @@ export async function summarizeSharedReceiptSpend(
   userId: string,
   groupBy: SpendGroupBy,
   filters: ReceiptListFilters = {},
+  display: SpendDisplay = "table",
 ): Promise<SpendSummaryResult> {
   if (!isSharedDataConfigured()) {
     return {
       groupBy,
+      display,
       buckets: [],
       receiptCount: 0,
       totalAmount: null,
@@ -791,13 +796,18 @@ export async function summarizeSharedReceiptSpend(
     currency: string | null;
   }>;
 
-  const buckets: SpendSummaryBucket[] = rows.map((row) => ({
+  let buckets: SpendSummaryBucket[] = rows.map((row) => ({
     key: row.bucket_key,
     label: row.bucket_key,
     count: row.count,
     totalAmount: Number(row.total_amount) || 0,
     currency: row.currency,
   }));
+
+  // Charts (especially month series) read left-to-right chronologically / alphabetically.
+  if (display === "chart") {
+    buckets = [...buckets].sort((a, b) => a.key.localeCompare(b.key));
+  }
 
   const receiptCount = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
   const currencies = new Set(
@@ -811,6 +821,7 @@ export async function summarizeSharedReceiptSpend(
 
   return {
     groupBy,
+    display,
     buckets,
     receiptCount,
     totalAmount,

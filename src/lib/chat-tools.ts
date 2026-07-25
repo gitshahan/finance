@@ -206,11 +206,17 @@ export function createChatTools(context: ChatToolsContext) {
 
     summarizeSpend: tool({
       description:
-        "Aggregate spend from saved receipts by merchant, category, or month. Use for totals and breakdowns.",
+        "Aggregate spend from saved receipts by merchant, category, or month. Use for totals and breakdowns. Set display to chart when the user asks for a graph, chart, plot, or visualization.",
       inputSchema: z.object({
         groupBy: z
           .enum(["merchant", "category", "month"])
           .describe("How to group totals."),
+        display: z
+          .enum(["table", "chart"])
+          .optional()
+          .describe(
+            "table (default) for a ranked breakdown; chart for a bar graph when the user asks for a graph/chart/plot.",
+          ),
         search: z.string().optional(),
         merchant: z.string().optional(),
         category: z.string().optional(),
@@ -218,11 +224,12 @@ export function createChatTools(context: ChatToolsContext) {
         dateTo: z.string().optional(),
       }),
       execute: async (input) => {
-        const { groupBy, ...filterFields } = input;
+        const { groupBy, display = "table", ...filterFields } = input;
         return summarizeSharedReceiptSpend(
           context.userId,
           groupBy,
           toReceiptFilters(filterFields),
+          display,
         );
       },
     }),

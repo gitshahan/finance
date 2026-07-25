@@ -1,5 +1,6 @@
 "use client";
 
+import { useUser } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type FileUIPart } from "ai";
@@ -26,6 +27,7 @@ type ChatInterfaceProps = {
 const DEFAULT_RECEIPT_CSV_PROMPT =
   "Summarize this CSV: columns, date range, merchants, and totals. Reply from the file contents only — no export.";
 
+// Treat as "at bottom" within this distance (covers floating ask bar padding).
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
 function shouldDeferRefocus(relatedTarget: EventTarget | null) {
@@ -53,6 +55,7 @@ export function ChatInterface({
   onTokenUsageChange,
   onHasMessagesChange,
 }: ChatInterfaceProps) {
+  const { user } = useUser();
   const [input, setInput] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -85,6 +88,12 @@ export function ChatInterface({
   const isEmptyChat = messages.length === 0;
   const hasAttachment = Boolean(attachedFile);
   const isAttachmentReady = !hasAttachment || Boolean(uploadedReceipt);
+  const userImageUrl = user?.imageUrl;
+  const userInitials =
+    user?.firstName?.charAt(0) ||
+    user?.username?.charAt(0) ||
+    user?.primaryEmailAddress?.emailAddress?.charAt(0) ||
+    "U";
   // New chats must start with a shared CSV file.
   const canSend =
     usageTrackingEnabled &&
@@ -105,6 +114,22 @@ export function ChatInterface({
     );
   }
 
+  function isLastMessageInView(container: HTMLElement) {
+    if (isNearBottom(container)) {
+      return true;
+    }
+
+    const end = messagesEndRef.current;
+    if (!end) {
+      return false;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const endRect = end.getBoundingClientRect();
+    // Any intersection with the scrollport counts, including under the ask bar.
+    return endRect.top < containerRect.bottom && endRect.bottom > containerRect.top;
+  }
+
   function updateScrollToBottomVisibility() {
     const container = messagesContainerRef.current;
 
@@ -113,9 +138,8 @@ export function ChatInterface({
       return;
     }
 
-    setShowScrollToBottom(
-      container.scrollHeight > container.clientHeight && !isNearBottom(container),
-    );
+    const canScroll = container.scrollHeight > container.clientHeight + 1;
+    setShowScrollToBottom(canScroll && !isLastMessageInView(container));
   }
 
   function scrollToBottom(behavior: ScrollBehavior = "smooth") {
@@ -124,6 +148,9 @@ export function ChatInterface({
       return;
     }
 
+    stickToBottomRef.current = true;
+    setShowScrollToBottom(false);
+
     // Scroll the messages pane directly — scrollIntoView can target the wrong ancestor.
     if (behavior === "smooth") {
       container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
@@ -131,6 +158,16 @@ export function ChatInterface({
     }
 
     container.scrollTop = container.scrollHeight;
+  }
+
+  // Overlay controls sit above the messages pane and would otherwise swallow wheel scroll.
+  function forwardWheelToMessages(event: React.WheelEvent) {
+    const container = messagesContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    container.scrollTop += event.deltaY;
   }
 
   function pinToBottom() {
@@ -398,6 +435,9 @@ export function ChatInterface({
     // Follow new content while stuck to bottom (pinned when the user sends).
     if (stickToBottomRef.current) {
       scrollToBottom(isSending ? "auto" : "smooth");
+      // Avoid re-showing the button before smooth scroll finishes.
+      setShowScrollToBottom(false);
+      return;
     }
 
     updateScrollToBottomVisibility();
@@ -405,14 +445,20 @@ export function ChatInterface({
 
   useEffect(() => {
     const container = messagesContainerRef.current;
+    const end = messagesEndRef.current;
 
     if (!container) {
       return;
     }
 
-    const handleScroll = () => {
-      stickToBottomRef.current = isNearBottom(container);
+    const syncBottomState = () => {
+      const atBottom = isLastMessageInView(container);
+      stickToBottomRef.current = atBottom;
       updateScrollToBottomVisibility();
+    };
+
+    const handleScroll = () => {
+      syncBottomState();
     };
     container.addEventListener("scroll", handleScroll, { passive: true });
 
@@ -420,15 +466,33 @@ export function ChatInterface({
       if (stickToBottomRef.current) {
         scrollToBottom("auto");
       }
-      updateScrollToBottomVisibility();
+      syncBottomState();
     });
     resizeObserver.observe(container);
 
-    updateScrollToBottomVisibility();
+    // Keep visibility in sync as the last message grows during streaming.
+    let intersectionObserver: IntersectionObserver | undefined;
+    if (end && messages.length > 0) {
+      intersectionObserver = new IntersectionObserver(
+        () => {
+          syncBottomState();
+        },
+        {
+          root: container,
+          threshold: 0,
+        },
+      );
+      intersectionObserver.observe(end);
+    } else {
+      setShowScrollToBottom(false);
+    }
+
+    syncBottomState();
 
     return () => {
       container.removeEventListener("scroll", handleScroll);
       resizeObserver.disconnect();
+      intersectionObserver?.disconnect();
     };
   }, [messages.length]);
 
@@ -449,7 +513,7 @@ export function ChatInterface({
 
   if (isEmptyChat) {
     return (
-      <section className="relative flex min-h-0 flex-1 flex-col">
+      <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Hidden picker — opened by the centered upload CTA */}
         <div className="sr-only">
           <ReceiptImageButton
@@ -467,7 +531,7 @@ export function ChatInterface({
           />
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-4 py-6">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-4 px-4 py-6">
           {!usageTrackingEnabled ? (
             <div className="w-full max-w-lg rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
               Chat is disabled because DATABASE_URL is not configured. Usage
@@ -557,113 +621,144 @@ export function ChatInterface({
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface">
-      <div className="relative min-h-0 flex-1">
-        <div
-          ref={messagesContainerRef}
-          className="h-full overflow-y-auto px-4 py-6 sm:px-6"
-        >
-          <div className="w-full space-y-4">
-            {!usageTrackingEnabled ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-                Chat is disabled because DATABASE_URL is not configured. Usage
-                quotas must be enforceable before the assistant can run.
-              </div>
-            ) : !chatPersistenceEnabled ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-                Chat history could not be loaded. New messages may not persist.
-              </div>
-            ) : null}
+    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
+      <div
+        ref={messagesContainerRef}
+        className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pt-6 pb-20 sm:px-6"
+      >
+        <div className="w-full min-w-0 max-w-full space-y-4">
+          {!usageTrackingEnabled ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+              Chat is disabled because DATABASE_URL is not configured. Usage
+              quotas must be enforceable before the assistant can run.
+            </div>
+          ) : !chatPersistenceEnabled ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+              Chat history could not be loaded. New messages may not persist.
+            </div>
+          ) : null}
 
-            {tokenUsage?.isQuotaExceeded ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-                <p className="font-medium">
-                  Usage limit reached for this account. Please contact support to
-                  extend your quota.
-                </p>
-              </div>
-            ) : null}
+          {tokenUsage?.isQuotaExceeded ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+              <p className="font-medium">
+                Usage limit reached for this account. Please contact support to
+                extend your quota.
+              </p>
+            </div>
+          ) : null}
 
-            {uploadError ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-                {uploadError}
-              </div>
-            ) : null}
+          {uploadError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+              {uploadError}
+            </div>
+          ) : null}
 
-            {error ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-                {error.message ||
-                  "Could not get a reply. Please check your configuration and try again."}
-              </div>
-            ) : null}
+          {error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+              {error.message ||
+                "Could not get a reply. Please check your configuration and try again."}
+            </div>
+          ) : null}
 
-            {messages.map((message, messageIndex) => {
-              const isLastMessage = messageIndex === messages.length - 1;
-              const isAssistantLoading =
-                isSending && isLastMessage && message.role === "assistant";
-              const isUser = message.role === "user";
+          {messages.map((message, messageIndex) => {
+            const isLastMessage = messageIndex === messages.length - 1;
+            const isAssistantLoading =
+              isSending && isLastMessage && message.role === "assistant";
+            const isUser = message.role === "user";
 
-              return (
+            return (
+              <div
+                key={message.id}
+                className={`flex min-w-0 items-start gap-2.5 ${
+                  isUser ? "justify-end" : "justify-start"
+                }`}
+              >
+                {!isUser ? (
+                  <img
+                    src="/vite.svg"
+                    alt=""
+                    width={28}
+                    height={28}
+                    className="mt-0.5 box-border h-7 w-7 shrink-0 rounded-full border border-border bg-white object-contain shadow-sm"
+                  />
+                ) : null}
                 <div
-                  key={message.id}
-                  className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+                  className={`min-w-0 break-words rounded-2xl px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight ${
+                    isUser
+                      ? "max-w-[min(100%,42rem)] bg-brand font-medium text-white"
+                      : "max-w-full flex-1 bg-surface-muted text-foreground"
+                  }`}
                 >
-                  <div
-                    className={`rounded-2xl px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight ${
-                      isUser
-                        ? "max-w-[min(100%,42rem)] bg-brand font-medium text-white"
-                        : "w-full max-w-none bg-surface-muted text-foreground"
-                    }`}
-                  >
-                    <ChatMessageContent
-                      message={message}
-                      isLoading={isAssistantLoading}
+                  <ChatMessageContent
+                    message={message}
+                    isLoading={isAssistantLoading}
+                  />
+                </div>
+                {isUser ? (
+                  userImageUrl ? (
+                    <img
+                      src={userImageUrl}
+                      alt=""
+                      width={28}
+                      height={28}
+                      className="mt-0.5 box-border h-7 w-7 shrink-0 rounded-full border border-border object-cover shadow-sm"
                     />
-                  </div>
-                </div>
-              );
-            })}
-            {isSending && messages.at(-1)?.role === "user" ? (
-              <div className="flex justify-start">
-                <div className="w-full rounded-2xl bg-surface-muted px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight text-muted">
-                  Working on your request…
-                </div>
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="mt-0.5 box-border flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-brand-soft text-xs font-semibold uppercase text-brand shadow-sm"
+                    >
+                      {userInitials}
+                    </span>
+                  )
+                ) : null}
               </div>
-            ) : null}
-            <div ref={messagesEndRef} />
-          </div>
+            );
+          })}
+          {isSending && messages.at(-1)?.role === "user" ? (
+            <div className="flex min-w-0 items-start gap-2.5 justify-start">
+              <img
+                src="/vite.svg"
+                alt=""
+                width={28}
+                height={28}
+                className="mt-0.5 box-border h-7 w-7 shrink-0 rounded-full border border-border bg-white object-contain shadow-sm"
+              />
+              <div className="min-w-0 flex-1 rounded-2xl bg-surface-muted px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight text-muted">
+                Working on your request…
+              </div>
+            </div>
+          ) : null}
+          <div ref={messagesEndRef} />
         </div>
-
-        {showScrollToBottom ? (
-          <button
-            type="button"
-            onClick={() => scrollToBottom()}
-            aria-label="Scroll to bottom"
-            className="absolute bottom-4 right-4 flex h-10 w-10 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-700 shadow-lg transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-5 w-5"
-              aria-hidden="true"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          </button>
-        ) : null}
       </div>
 
+      {showScrollToBottom ? (
+        <button
+          type="button"
+          onClick={() => scrollToBottom()}
+          onWheel={forwardWheelToMessages}
+          aria-label="Scroll to bottom"
+          className="absolute bottom-[4.25rem] left-1/2 z-20 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border/80 bg-surface/90 text-foreground shadow-md backdrop-blur-sm transition hover:bg-surface"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4"
+            aria-hidden="true"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+      ) : null}
+
       <form
-        className={`shrink-0 border-t px-4 py-4 transition sm:px-6 ${
-          isFileDragOver
-            ? "border-brand-accent bg-brand-soft/60"
-            : "border-border"
-        }`}
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-3 pt-2 sm:px-4"
         onDragOver={handleComposerDragOver}
         onDragLeave={handleComposerDragLeave}
         onDrop={handleComposerDrop}
@@ -672,165 +767,174 @@ export function ChatInterface({
           void sendCurrentMessage();
         }}
       >
-        <div className="w-full">
-        {hasAttachment ? (
-          <div
-            className={`mb-3 flex items-start gap-3 rounded-xl border p-3 ${
-              isUploadingReceipt
-                ? "border-brand-accent bg-brand-soft/70"
-                : "border-border bg-surface-muted"
-            }`}
-            aria-busy={isUploadingReceipt}
-          >
-            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border">
-              <div
-                className={`flex h-full w-full items-center justify-center bg-surface text-xs font-semibold uppercase text-brand ${
-                  isUploadingReceipt ? "opacity-60" : ""
-                }`}
-                aria-hidden="true"
-              >
-                CSV
-              </div>
-              {isUploadingReceipt ? (
+        <div
+          onWheel={forwardWheelToMessages}
+          className={`pointer-events-auto mx-auto w-full min-w-0 max-w-3xl border bg-surface-muted/90 shadow-[0_8px_30px_rgba(15,39,68,0.14)] backdrop-blur-md transition focus-within:ring-2 focus-within:ring-brand-ring dark:bg-surface-muted/95 dark:shadow-[0_8px_30px_rgba(0,0,0,0.4)] ${
+            hasAttachment ? "rounded-3xl" : "rounded-full"
+          } ${
+            isFileDragOver
+              ? "border-brand-accent ring-2 ring-brand-ring/40"
+              : "border-border/70"
+          }`}
+        >
+          {hasAttachment ? (
+            <div
+              className={`flex items-start gap-3 border-b p-3 ${
+                isUploadingReceipt
+                  ? "border-brand-accent/40 bg-brand-soft/70"
+                  : "border-border/70"
+              }`}
+              aria-busy={isUploadingReceipt}
+            >
+              <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-border">
                 <div
-                  className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-surface/40"
+                  className={`flex h-full w-full items-center justify-center bg-surface text-xs font-semibold uppercase text-brand ${
+                    isUploadingReceipt ? "opacity-60" : ""
+                  }`}
                   aria-hidden="true"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-6 w-6 animate-spin text-brand"
-                  >
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                  </svg>
+                  CSV
                 </div>
-              ) : null}
-            </div>
-            <div className="min-w-0 flex-1 text-sm">
-              <p className="font-semibold tracking-tight text-foreground">
-                {isUploadingReceipt ? "Uploading CSV…" : "CSV attached"}
-              </p>
-              <p className="truncate text-muted">
-                {isUploadingReceipt
-                  ? uploadProgress !== undefined
-                    ? `${uploadProgress}% · ${attachedFile?.name ?? "Preparing…"}`
-                    : (attachedFile?.name ?? "Preparing…")
-                  : (attachedFile?.name ?? "CSV ready to send")}
-              </p>
-              {isUploadingReceipt ? (
-                <div
-                  className="mt-2 h-1.5 overflow-hidden rounded-full bg-brand-muted"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={uploadProgress}
-                  aria-label={
-                    uploadProgress !== undefined
-                      ? `Upload progress ${uploadProgress} percent`
-                      : "Upload in progress"
-                  }
-                >
+                {isUploadingReceipt ? (
                   <div
-                    className={`h-full rounded-full bg-brand-accent transition-[width] duration-150 ease-out ${
-                      uploadProgress === undefined
-                        ? "w-1/3 animate-pulse"
-                        : ""
-                    }`}
-                    style={
+                    className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-surface/40"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-6 w-6 animate-spin text-brand"
+                    >
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                  </div>
+                ) : null}
+              </div>
+              <div className="min-w-0 flex-1 text-sm">
+                <p className="font-semibold tracking-tight text-foreground">
+                  {isUploadingReceipt ? "Uploading CSV…" : "CSV attached"}
+                </p>
+                <p className="truncate text-muted">
+                  {isUploadingReceipt
+                    ? uploadProgress !== undefined
+                      ? `${uploadProgress}% · ${attachedFile?.name ?? "Preparing…"}`
+                      : (attachedFile?.name ?? "Preparing…")
+                    : (attachedFile?.name ?? "CSV ready to send")}
+                </p>
+                {isUploadingReceipt ? (
+                  <div
+                    className="mt-2 h-1.5 overflow-hidden rounded-full bg-brand-muted"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={uploadProgress}
+                    aria-label={
                       uploadProgress !== undefined
-                        ? { width: `${Math.max(uploadProgress, 4)}%` }
-                        : undefined
+                        ? `Upload progress ${uploadProgress} percent`
+                        : "Upload in progress"
                     }
-                  />
-                </div>
-              ) : null}
+                  >
+                    <div
+                      className={`h-full rounded-full bg-brand-accent transition-[width] duration-150 ease-out ${
+                        uploadProgress === undefined
+                          ? "w-1/3 animate-pulse"
+                          : ""
+                      }`}
+                      style={
+                        uploadProgress !== undefined
+                          ? { width: `${Math.max(uploadProgress, 4)}%` }
+                          : undefined
+                      }
+                    />
+                  </div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={clearAttachment}
+                disabled={isSending || isUploadingReceipt}
+                className="rounded-lg px-2 py-1 text-sm text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Remove
+              </button>
             </div>
+          ) : null}
+
+          <div className="flex h-12 min-w-0 items-center gap-1 px-1.5">
+            <ReceiptImageButton
+              ref={attachButtonRef}
+              variant="inline"
+              disabled={isSending || !usageTrackingEnabled}
+              uploading={isUploadingReceipt}
+              progress={uploadProgress}
+              onSelect={(file) => void handleReceiptSelect(file)}
+            />
+            <textarea
+              ref={inputRef}
+              autoFocus
+              rows={1}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onBlur={handleInputBlur}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendCurrentMessage();
+                }
+              }}
+              placeholder="Ask.."
+              className="h-full min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1.5 py-2.5 text-[0.9375rem] tracking-tight outline-none placeholder:text-muted"
+              disabled={isSending || !usageTrackingEnabled}
+            />
             <button
-              type="button"
-              onClick={clearAttachment}
-              disabled={isSending || isUploadingReceipt}
-              className="rounded-lg px-2 py-1 text-sm text-zinc-600 transition hover:bg-zinc-200 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              type="submit"
+              disabled={
+                isSending ||
+                !canSend ||
+                !usageTrackingEnabled ||
+                Boolean(tokenUsage?.isQuotaExceeded)
+              }
+              aria-label={isSending ? "Sending" : "Send message"}
+              title={isSending ? "Sending…" : "Send"}
+              className="mr-0.5 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-brand text-white transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Remove
+              {isSending ? (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4 animate-spin"
+                  aria-hidden="true"
+                >
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              ) : (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4"
+                  aria-hidden="true"
+                >
+                  <path d="M12 19V5" />
+                  <path d="m5 12 7-7 7 7" />
+                </svg>
+              )}
             </button>
           </div>
-        ) : null}
-
-        <div className="flex h-12 min-w-0 items-center gap-1 rounded-xl border border-border bg-surface px-1.5 transition focus-within:ring-2 focus-within:ring-brand-ring">
-          <ReceiptImageButton
-            ref={attachButtonRef}
-            variant="inline"
-            disabled={isSending || !usageTrackingEnabled}
-            uploading={isUploadingReceipt}
-            progress={uploadProgress}
-            onSelect={(file) => void handleReceiptSelect(file)}
-          />
-          <textarea
-            ref={inputRef}
-            autoFocus
-            rows={1}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onBlur={handleInputBlur}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void sendCurrentMessage();
-              }
-            }}
-            placeholder="Ask about your CSV or saved receipts..."
-            className="h-full min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1.5 py-2.5 text-[0.9375rem] tracking-tight outline-none placeholder:text-muted"
-            disabled={isSending || !usageTrackingEnabled}
-          />
-          <button
-            type="submit"
-            disabled={
-              isSending ||
-              !canSend ||
-              !usageTrackingEnabled ||
-              Boolean(tokenUsage?.isQuotaExceeded)
-            }
-            aria-label={isSending ? "Sending" : "Send message"}
-            title={isSending ? "Sending…" : "Send"}
-            className="mr-0.5 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-brand text-white transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isSending ? (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-4 w-4 animate-spin"
-                aria-hidden="true"
-              >
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
-            ) : (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-4 w-4"
-                aria-hidden="true"
-              >
-                <path d="M12 19V5" />
-                <path d="m5 12 7-7 7 7" />
-              </svg>
-            )}
-          </button>
-        </div>
         </div>
       </form>
     </section>

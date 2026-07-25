@@ -5,6 +5,7 @@ import { AssistantMessageHtml } from "@/components/assistant-message-html";
 import { ChatCsvDownload } from "@/components/chat-csv-download";
 import {
   ChatSpendSummary,
+  isChartSpendSummary,
   isSpendSummaryResult,
 } from "@/components/chat-spend-summary";
 import type {
@@ -140,10 +141,26 @@ export function ChatMessageContent({
     );
   }
 
+  const hasChartSpendSummary = message.parts.some((part) => {
+    if (!isNamedToolPart(part, "summarizeSpend")) {
+      return false;
+    }
+    const toolPart = part as UIMessage["parts"][number] & ToolPart;
+    return (
+      toolPart.state === "output-available" &&
+      isChartSpendSummary(toolPart.output)
+    );
+  });
+
   return (
     <div className="space-y-2">
       {message.parts.map((part, index) => {
         if (part.type === "text" && part.text) {
+          // Chart replies should be graph-only — hide any narrative the model adds.
+          if (message.role === "assistant" && hasChartSpendSummary) {
+            return null;
+          }
+
           if (message.role === "assistant") {
             return (
               <AssistantMessageHtml
