@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type FileUIPart } from "ai";
 import type { UIMessage } from "ai";
 import { ChatMessageContent } from "@/components/chat-message-content";
-import { ReceiptImageButton } from "@/components/receipt-image-button";
-import { getReceiptUploadSizeLimitError, isCsvFile } from "@/lib/receipt-image-url";
+import {
+  ReceiptImageButton,
+  type ReceiptImageButtonHandle,
+} from "@/components/receipt-image-button";
+import { getReceiptUploadSizeLimitError } from "@/lib/receipt-image-url";
 import { uploadReceiptImage } from "@/lib/receipt-upload";
 import type { UserTokenUsage } from "@/lib/token-usage-store";
 
@@ -17,13 +20,11 @@ type ChatInterfaceProps = {
   usageTrackingEnabled?: boolean;
   tokenUsage: UserTokenUsage | null;
   onTokenUsageChange: (usage: UserTokenUsage) => void;
+  onHasMessagesChange?: (hasMessages: boolean) => void;
 };
 
-const DEFAULT_RECEIPT_IMAGE_PROMPT =
-  "Please analyze this payment receipt and summarize the key details.";
-
 const DEFAULT_RECEIPT_CSV_PROMPT =
-  "Please analyze this CSV file of receipt data and summarize the key details.";
+  "Summarize this CSV: columns, date range, merchants, and totals. Reply from the file contents only — no export.";
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
@@ -50,6 +51,7 @@ export function ChatInterface({
   usageTrackingEnabled = true,
   tokenUsage,
   onTokenUsageChange,
+  onHasMessagesChange,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -61,16 +63,10 @@ export function ChatInterface({
   const [uploadProgress, setUploadProgress] = useState<number | undefined>(
     undefined,
   );
-  const attachmentIsCsv = attachedFile ? isCsvFile(attachedFile) : false;
-  const attachmentPreviewUrl = useMemo(() => {
-    if (!attachedFile || isCsvFile(attachedFile)) {
-      return null;
-    }
-
-    return URL.createObjectURL(attachedFile);
-  }, [attachedFile]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const attachButtonRef = useRef<ReceiptImageButtonHandle>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const didInitialScrollRef = useRef(false);
@@ -85,13 +81,17 @@ export function ChatInterface({
   const prevStatusRef = useRef(status);
 
   const isSending = status === "submitted" || status === "streaming";
+  const isEmptyChat = messages.length === 0;
   const hasAttachment = Boolean(attachedFile);
   const isAttachmentReady = !hasAttachment || Boolean(uploadedReceipt);
+  // New chats must start with a shared CSV file.
   const canSend =
     usageTrackingEnabled &&
-    Boolean(input.trim() || hasAttachment) &&
+    !isUploadingReceipt &&
     isAttachmentReady &&
-    !isUploadingReceipt;
+    (isEmptyChat
+      ? Boolean(uploadedReceipt)
+      : Boolean(input.trim() || hasAttachment));
 
   function focusInput() {
     inputRef.current?.focus();
@@ -135,6 +135,54 @@ export function ChatInterface({
     setUploadError(null);
   }
 
+  async function sendMessageWithFile(
+    filePart: FileUIPart,
+    options?: { note?: string },
+  ) {
+    if (!usageTrackingEnabled || isSending) {
+      return;
+    }
+
+    setUploadError(null);
+    const text = options?.note?.trim() || DEFAULT_RECEIPT_CSV_PROMPT;
+    // Clear the composer attachment as soon as send starts so the UI doesn't
+    // look stuck on "CSV attached" while the model/tools run.
+    setInput("");
+    clearAttachment();
+
+    try {
+      await sendMessage({
+        text,
+        files: [filePart],
+      });
+    } catch (error) {
+      const maybeResponseError = error as {
+        response?: {
+          status?: number;
+          json?: () => Promise<{ usage?: UserTokenUsage }>;
+        };
+      };
+
+      if (
+        maybeResponseError.response?.status === 429 &&
+        maybeResponseError.response.json
+      ) {
+        try {
+          const data = await maybeResponseError.response.json();
+          if (data.usage) {
+            onTokenUsageChange(data.usage);
+          }
+        } catch (jsonError) {
+          console.error("Failed to parse quota response:", jsonError);
+        }
+      }
+
+      throw error;
+    }
+
+    requestAnimationFrame(() => focusInput());
+  }
+
   async function handleReceiptSelect(file: File) {
     const sizeLimitError = getReceiptUploadSizeLimitError(file);
     if (sizeLimitError) {
@@ -146,6 +194,9 @@ export function ChatInterface({
       return;
     }
 
+    const startEmptyChat = messages.length === 0;
+    const note = input.trim();
+
     setAttachedFile(file);
     setUploadedReceipt(null);
     setUploadError(null);
@@ -155,13 +206,22 @@ export function ChatInterface({
     try {
       const uploaded = await uploadReceiptImage(file, setUploadProgress);
       setUploadedReceipt(uploaded);
+
+      // Empty chats start as soon as a CSV is shared.
+      if (startEmptyChat) {
+        setIsUploadingReceipt(false);
+        setUploadProgress(undefined);
+        await sendMessageWithFile(uploaded, { note });
+        return;
+      }
     } catch (error) {
-      console.error("Receipt upload failed:", error);
+      console.error("CSV upload failed:", error);
       setAttachedFile(null);
+      setUploadedReceipt(null);
       setUploadError(
         error instanceof Error
           ? error.message
-          : "Unable to upload the receipt file right now. Please try again.",
+          : "Unable to upload the CSV file right now. Please try again.",
       );
     } finally {
       setIsUploadingReceipt(false);
@@ -174,15 +234,23 @@ export function ChatInterface({
       return;
     }
 
+    if (isEmptyChat) {
+      if (!uploadedReceipt) {
+        return;
+      }
+
+      await sendMessageWithFile(uploadedReceipt, {
+        note: input,
+      });
+      return;
+    }
+
     setUploadError(null);
     const text =
-      input.trim() ||
-      (hasAttachment
-        ? attachmentIsCsv
-          ? DEFAULT_RECEIPT_CSV_PROMPT
-          : DEFAULT_RECEIPT_IMAGE_PROMPT
-        : "");
+      input.trim() || (hasAttachment ? DEFAULT_RECEIPT_CSV_PROMPT : "");
     const files = uploadedReceipt ? [uploadedReceipt] : undefined;
+    setInput("");
+    clearAttachment();
 
     try {
       await sendMessage({
@@ -214,9 +282,44 @@ export function ChatInterface({
       throw error;
     }
 
-    setInput("");
-    clearAttachment();
     requestAnimationFrame(() => focusInput());
+  }
+
+  function handleComposerDragOver(event: React.DragEvent<HTMLElement>) {
+    if (!usageTrackingEnabled || isSending || isUploadingReceipt) {
+      return;
+    }
+
+    if (![...event.dataTransfer.types].includes("Files")) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsFileDragOver(true);
+  }
+
+  function handleComposerDragLeave(event: React.DragEvent<HTMLElement>) {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) {
+      return;
+    }
+
+    setIsFileDragOver(false);
+  }
+
+  function handleComposerDrop(event: React.DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsFileDragOver(false);
+
+    if (!usageTrackingEnabled || isSending || isUploadingReceipt) {
+      return;
+    }
+
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+      void handleReceiptSelect(file);
+    }
   }
 
   useEffect(() => {
@@ -248,14 +351,20 @@ export function ChatInterface({
   }, [status, onTokenUsageChange]);
 
   useEffect(() => {
-    focusInput();
-  }, []);
+    onHasMessagesChange?.(!isEmptyChat);
+  }, [isEmptyChat, onHasMessagesChange]);
 
   useEffect(() => {
-    if (!isSending) {
+    if (!isEmptyChat) {
       focusInput();
     }
-  }, [isSending]);
+  }, [isEmptyChat]);
+
+  useEffect(() => {
+    if (!isSending && !isEmptyChat) {
+      focusInput();
+    }
+  }, [isSending, isEmptyChat]);
 
   useEffect(() => {
     const container = messagesContainerRef.current;
@@ -304,14 +413,6 @@ export function ChatInterface({
     };
   }, [messages.length]);
 
-  useEffect(() => {
-    return () => {
-      if (attachmentPreviewUrl) {
-        URL.revokeObjectURL(attachmentPreviewUrl);
-      }
-    };
-  }, [attachmentPreviewUrl]);
-
   function handleInputBlur(event: React.FocusEvent<HTMLTextAreaElement>) {
     const next = event.relatedTarget;
     const form = event.currentTarget.form;
@@ -327,89 +428,190 @@ export function ChatInterface({
     requestAnimationFrame(() => focusInput());
   }
 
+  if (isEmptyChat) {
+    return (
+      <section className="relative flex min-h-0 flex-1 flex-col">
+        {/* Hidden picker — opened by the centered upload CTA */}
+        <div className="sr-only">
+          <ReceiptImageButton
+            ref={attachButtonRef}
+            variant="inline"
+            disabled={
+              !usageTrackingEnabled ||
+              isSending ||
+              isUploadingReceipt ||
+              Boolean(tokenUsage?.isQuotaExceeded)
+            }
+            uploading={isUploadingReceipt}
+            progress={uploadProgress}
+            onSelect={(file) => void handleReceiptSelect(file)}
+          />
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-4 py-6">
+          {!usageTrackingEnabled ? (
+            <div className="w-full max-w-lg rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+              Chat is disabled because DATABASE_URL is not configured. Usage
+              quotas must be enforceable before the assistant can run.
+            </div>
+          ) : !chatPersistenceEnabled ? (
+            <div className="w-full max-w-lg rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+              Chat history could not be loaded. New messages may not persist.
+            </div>
+          ) : null}
+
+          {tokenUsage?.isQuotaExceeded ? (
+            <div className="w-full max-w-lg rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+              <p className="font-medium">
+                Usage limit reached for this account. Please contact support to
+                extend your quota.
+              </p>
+            </div>
+          ) : null}
+
+          {uploadError ? (
+            <div className="w-full max-w-lg rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+              {uploadError}
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            disabled={
+              !usageTrackingEnabled ||
+              isSending ||
+              isUploadingReceipt ||
+              Boolean(tokenUsage?.isQuotaExceeded)
+            }
+            onClick={() => attachButtonRef.current?.open()}
+            onDragOver={handleComposerDragOver}
+            onDragLeave={handleComposerDragLeave}
+            onDrop={handleComposerDrop}
+            className={`flex w-full max-w-lg cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border border-dashed px-8 py-14 text-center transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              isFileDragOver
+                ? "border-brand-accent bg-brand-soft"
+                : "border-border/80 bg-transparent hover:border-brand-ring hover:bg-brand-soft/50"
+            }`}
+          >
+            <img
+              src="/vite.svg"
+              alt=""
+              width={48}
+              height={48}
+              className="h-12 w-12 rounded-xl bg-white object-contain p-1 shadow-sm"
+            />
+            <span className="font-display text-lg font-semibold tracking-display text-foreground">
+              Upload a CSV to start
+            </span>
+            <span className="max-w-md text-sm leading-relaxed text-muted">
+              Drop your bank or card CSV here (under 1MB). The chat begins once
+              the file is uploaded.
+            </span>
+            {isUploadingReceipt && uploadProgress !== undefined ? (
+              <div className="w-full max-w-xs space-y-2">
+                <div
+                  className="h-1.5 overflow-hidden rounded-full bg-brand-muted"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={uploadProgress}
+                  aria-label={`Upload progress ${uploadProgress} percent`}
+                >
+                  <div
+                    className="h-full rounded-full bg-brand-accent transition-[width] duration-150 ease-out"
+                    style={{ width: `${Math.max(uploadProgress, 4)}%` }}
+                  />
+                </div>
+                <span className="block text-sm font-medium text-brand">
+                  Uploading… {uploadProgress}%
+                </span>
+              </div>
+            ) : (
+              <span className="rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold tracking-tight text-white transition hover:bg-brand-strong">
+                {isUploadingReceipt ? "Uploading…" : "Choose CSV"}
+              </span>
+            )}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
       <div className="relative min-h-0 flex-1">
         <div
           ref={messagesContainerRef}
           className="h-full space-y-4 overflow-y-auto p-6"
         >
-        {!usageTrackingEnabled ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-            Chat is disabled because DATABASE_URL is not configured. Usage
-            quotas must be enforceable before the assistant can run.
-          </div>
-        ) : !chatPersistenceEnabled ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-            Chat history could not be loaded. New messages may not persist.
-          </div>
-        ) : null}
+          {!usageTrackingEnabled ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+              Chat is disabled because DATABASE_URL is not configured. Usage
+              quotas must be enforceable before the assistant can run.
+            </div>
+          ) : !chatPersistenceEnabled ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+              Chat history could not be loaded. New messages may not persist.
+            </div>
+          ) : null}
 
-        {tokenUsage?.isQuotaExceeded ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-            <p className="font-medium">
-              Usage limit reached for this account. Please contact support to
-              extend your quota.
-            </p>
-          </div>
-        ) : null}
+          {tokenUsage?.isQuotaExceeded ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+              <p className="font-medium">
+                Usage limit reached for this account. Please contact support to
+                extend your quota.
+              </p>
+            </div>
+          ) : null}
 
-        {uploadError ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-            {uploadError}
-          </div>
-        ) : null}
+          {uploadError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+              {uploadError}
+            </div>
+          ) : null}
 
-        {error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-            {error.message ||
-              "Could not get a reply. Please check your configuration and try again."}
-          </div>
-        ) : null}
+          {error ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
+              {error.message ||
+                "Could not get a reply. Please check your configuration and try again."}
+            </div>
+          ) : null}
 
-        {messages.length === 0 ? (
-          <div className="space-y-3 rounded-lg border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-            <p>
-              Attach this week&apos;s receipt images or a bank/card CSV to build
-              your receipt memory.
-            </p>
-            <p className="text-zinc-600 dark:text-zinc-300">
-              Try asking: &quot;How much did I spend on dining this month?&quot; or
-              &quot;Export my Netflix receipts.&quot;
-            </p>
-          </div>
-        ) : null}
+          {messages.map((message, messageIndex) => {
+            const isLastMessage = messageIndex === messages.length - 1;
+            const isAssistantLoading =
+              isSending && isLastMessage && message.role === "assistant";
 
-        {messages.map((message, messageIndex) => {
-          const isLastMessage = messageIndex === messages.length - 1;
-          const isAssistantLoading =
-            isSending &&
-            isLastMessage &&
-            message.role === "assistant";
-
-          return (
-            <div
-              key={message.id}
-              className={`flex ${
-                message.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
+            return (
               <div
-                className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
-                  message.role === "user"
-                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+                key={message.id}
+                className={`flex ${
+                  message.role === "user" ? "justify-end" : "justify-start"
                 }`}
               >
-                <ChatMessageContent
-                  message={message}
-                  isLoading={isAssistantLoading}
-                />
+                <div
+                  className={`max-w-[80%] rounded-2xl px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight ${
+                    message.role === "user"
+                      ? "bg-brand font-medium text-white"
+                      : "bg-surface-muted text-foreground"
+                  }`}
+                >
+                  <ChatMessageContent
+                    message={message}
+                    isLoading={isAssistantLoading}
+                  />
+                </div>
+              </div>
+            );
+          })}
+          {isSending && messages.at(-1)?.role === "user" ? (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] rounded-2xl bg-surface-muted px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight text-muted">
+                Working on your request…
               </div>
             </div>
-          );
-        })}
-        <div ref={messagesEndRef} />
+          ) : null}
+          <div ref={messagesEndRef} />
         </div>
 
         {showScrollToBottom ? (
@@ -437,40 +639,95 @@ export function ChatInterface({
       </div>
 
       <form
-        className="shrink-0 border-t border-zinc-200 p-4 dark:border-zinc-800"
+        className={`shrink-0 border-t p-4 transition ${
+          isFileDragOver
+            ? "border-brand-accent bg-brand-soft/60"
+            : "border-border"
+        }`}
+        onDragOver={handleComposerDragOver}
+        onDragLeave={handleComposerDragLeave}
+        onDrop={handleComposerDrop}
         onSubmit={(event) => {
           event.preventDefault();
           void sendCurrentMessage();
         }}
       >
         {hasAttachment ? (
-          <div className="mb-3 flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-950">
-            {attachmentPreviewUrl ? (
-              <img
-                src={attachmentPreviewUrl}
-                alt="Receipt preview"
-                className="h-20 w-20 rounded-lg border border-zinc-200 object-cover dark:border-zinc-700"
-              />
-            ) : (
+          <div
+            className={`mb-3 flex items-start gap-3 rounded-xl border p-3 ${
+              isUploadingReceipt
+                ? "border-brand-accent bg-brand-soft/70"
+                : "border-border bg-surface-muted"
+            }`}
+            aria-busy={isUploadingReceipt}
+          >
+            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border">
               <div
-                className="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white text-xs font-semibold uppercase text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                className={`flex h-full w-full items-center justify-center bg-surface text-xs font-semibold uppercase text-brand ${
+                  isUploadingReceipt ? "opacity-60" : ""
+                }`}
                 aria-hidden="true"
               >
                 CSV
               </div>
-            )}
+              {isUploadingReceipt ? (
+                <div
+                  className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-surface/40"
+                  aria-hidden="true"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-6 w-6 animate-spin text-brand"
+                  >
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                </div>
+              ) : null}
+            </div>
             <div className="min-w-0 flex-1 text-sm">
-              <p className="font-medium text-zinc-900 dark:text-zinc-100">
-                {attachmentIsCsv ? "CSV file attached" : "Payment receipt attached"}
+              <p className="font-semibold tracking-tight text-foreground">
+                {isUploadingReceipt ? "Uploading CSV…" : "CSV attached"}
               </p>
-              <p className="text-zinc-500 dark:text-zinc-400">
+              <p className="truncate text-muted">
                 {isUploadingReceipt
                   ? uploadProgress !== undefined
-                    ? `Uploading… ${uploadProgress}%`
-                    : "Uploading…"
-                  : (attachedFile?.name ??
-                    (attachmentIsCsv ? "CSV ready to send" : "Image ready to send"))}
+                    ? `${uploadProgress}% · ${attachedFile?.name ?? "Preparing…"}`
+                    : (attachedFile?.name ?? "Preparing…")
+                  : (attachedFile?.name ?? "CSV ready to send")}
               </p>
+              {isUploadingReceipt ? (
+                <div
+                  className="mt-2 h-1.5 overflow-hidden rounded-full bg-brand-muted"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={uploadProgress}
+                  aria-label={
+                    uploadProgress !== undefined
+                      ? `Upload progress ${uploadProgress} percent`
+                      : "Upload in progress"
+                  }
+                >
+                  <div
+                    className={`h-full rounded-full bg-brand-accent transition-[width] duration-150 ease-out ${
+                      uploadProgress === undefined
+                        ? "w-1/3 animate-pulse"
+                        : ""
+                    }`}
+                    style={
+                      uploadProgress !== undefined
+                        ? { width: `${Math.max(uploadProgress, 4)}%` }
+                        : undefined
+                    }
+                  />
+                </div>
+              ) : null}
             </div>
             <button
               type="button"
@@ -484,13 +741,15 @@ export function ChatInterface({
         ) : null}
 
         <div className="flex items-center gap-3">
-          <ReceiptImageButton
-            disabled={isSending}
-            uploading={isUploadingReceipt}
-            progress={uploadProgress}
-            onSelect={(file) => void handleReceiptSelect(file)}
-          />
-          <div className="min-w-0 flex-1">
+          <div className="flex h-12 min-w-0 flex-1 items-center gap-1 rounded-xl border border-border bg-surface px-1.5 transition focus-within:ring-2 focus-within:ring-brand-ring">
+            <ReceiptImageButton
+              ref={attachButtonRef}
+              variant="inline"
+              disabled={isSending || !usageTrackingEnabled}
+              uploading={isUploadingReceipt}
+              progress={uploadProgress}
+              onSelect={(file) => void handleReceiptSelect(file)}
+            />
             <textarea
               ref={inputRef}
               autoFocus
@@ -504,8 +763,8 @@ export function ChatInterface({
                   void sendCurrentMessage();
                 }
               }}
-              placeholder="Ask about a receipt you shared..."
-              className="h-12 w-full resize-none overflow-hidden rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950"
+              placeholder="Ask about your CSV or saved receipts..."
+              className="h-full min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1.5 py-2.5 text-[0.9375rem] tracking-tight outline-none placeholder:text-muted"
               disabled={isSending || !usageTrackingEnabled}
             />
           </div>
@@ -517,7 +776,7 @@ export function ChatInterface({
               !usageTrackingEnabled ||
               Boolean(tokenUsage?.isQuotaExceeded)
             }
-            className="h-12 cursor-pointer rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+            className="h-12 cursor-pointer rounded-xl bg-brand px-4 text-sm font-semibold tracking-tight text-white transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSending ? "Sending..." : "Send"}
           </button>

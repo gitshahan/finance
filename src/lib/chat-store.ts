@@ -85,7 +85,7 @@ export async function listChatsByUser(userId: string): Promise<ChatThread[]> {
     return [
       {
         chatId: DEFAULT_CHAT_ID,
-        title: "New chat",
+        title: "Main chat",
         updatedAt: new Date(0).toISOString(),
       },
     ];
@@ -94,7 +94,16 @@ export async function listChatsByUser(userId: string): Promise<ChatThread[]> {
   await ensureChatTable();
   const sql = getSqlClient();
 
-  await ensureThreadRow(userId, DEFAULT_CHAT_ID);
+  await ensureThreadRow(userId, DEFAULT_CHAT_ID, "Main chat");
+
+  // Prefer a distinct label for the default thread over the generic starter title.
+  await sql`
+    UPDATE chat_threads
+    SET title = 'Main chat'
+    WHERE user_id = ${userId}
+      AND chat_id = ${DEFAULT_CHAT_ID}
+      AND title = 'New chat'
+  `;
 
   // Backfill threads for any legacy message rows without a thread record.
   await sql`
@@ -179,6 +188,56 @@ export async function renameChatForUser(
   };
 }
 
+/** One query for every receipt blob URL still referenced in this user's chats. */
+async function loadReceiptBlobUrlsForUser(userId: string): Promise<Set<string>> {
+  const sql = getSqlClient();
+  const rows = (await sql`
+    SELECT message_json
+    FROM chat_messages
+    WHERE user_id = ${userId}
+  `) as Array<{ message_json: UIMessage }>;
+
+  const urls = new Set<string>();
+  for (const row of rows) {
+    for (const url of extractReceiptBlobUrls([row.message_json], userId)) {
+      urls.add(url);
+    }
+  }
+  return urls;
+}
+
+/** Delete blobs that no chat or receipt index still references. */
+export async function cleanupOrphanedReceiptBlobs(
+  userId: string,
+  candidateUrls: string[],
+) {
+  if (!process.env.BLOB_READ_WRITE_TOKEN || candidateUrls.length === 0) {
+    return;
+  }
+
+  const remainingUrls = await loadReceiptBlobUrlsForUser(userId);
+  const orphans = candidateUrls.filter((url) => !remainingUrls.has(url));
+  if (orphans.length === 0) {
+    return;
+  }
+
+  const { del } = await import("@vercel/blob");
+  await Promise.all(
+    orphans.map(async (url) => {
+      const indexed = await countSharedReceiptsBySourceUrl(userId, url);
+      if (indexed > 0) {
+        return;
+      }
+
+      try {
+        await del(url);
+      } catch (error) {
+        console.error("Failed to delete orphaned receipt blob:", url, error);
+      }
+    }),
+  );
+}
+
 export async function deleteChatForUser(userId: string, chatId: string) {
   if (!isValidChatId(chatId) || chatId === DEFAULT_CHAT_ID) {
     return { ok: false as const, error: "Cannot delete this chat." };
@@ -186,7 +245,18 @@ export async function deleteChatForUser(userId: string, chatId: string) {
 
   await ensureChatTable();
   const sql = getSqlClient();
-  const previousMessages = await loadMessagesByUser(userId, chatId);
+
+  // Lightweight read — avoid ensureThreadRow side effects from loadMessagesByUser.
+  const previousRows = (await sql`
+    SELECT message_json
+    FROM chat_messages
+    WHERE user_id = ${userId}
+      AND chat_id = ${chatId}
+  `) as Array<{ message_json: UIMessage }>;
+  const previousUrls = extractReceiptBlobUrls(
+    previousRows.map((row) => row.message_json),
+    userId,
+  );
 
   await sql.transaction([
     sql`
@@ -201,40 +271,8 @@ export async function deleteChatForUser(userId: string, chatId: string) {
     `,
   ]);
 
-  // Only delete blobs that are not referenced in any remaining chat.
-  const allThreads = await listChatsByUser(userId);
-  const remainingUrls = new Set<string>();
-
-  for (const thread of allThreads) {
-    const messages = await loadMessagesByUser(userId, thread.chatId);
-    for (const url of extractReceiptBlobUrls(messages, userId)) {
-      remainingUrls.add(url);
-    }
-  }
-
-  const previousUrls = extractReceiptBlobUrls(previousMessages, userId);
-  const candidateOrphans = previousUrls.filter((url) => !remainingUrls.has(url));
-
-  // Keep account-wide receipt index; only delete blobs not referenced by index.
-  if (process.env.BLOB_READ_WRITE_TOKEN && candidateOrphans.length > 0) {
-    const { del } = await import("@vercel/blob");
-    await Promise.all(
-      candidateOrphans.map(async (url) => {
-        const indexed = await countSharedReceiptsBySourceUrl(userId, url);
-        if (indexed > 0) {
-          return;
-        }
-
-        try {
-          await del(url);
-        } catch (error) {
-          console.error("Failed to delete orphaned receipt blob:", url, error);
-        }
-      }),
-    );
-  }
-
-  return { ok: true as const };
+  // Blob cleanup is returned for the caller to run after the response (after()).
+  return { ok: true as const, orphanCandidateUrls: previousUrls };
 }
 
 export async function loadMessagesByUser(
@@ -376,42 +414,7 @@ export async function replaceMessagesByUser(
 
   await sql.transaction(queries);
 
-  // Orphan cleanup must consider all chats for this user, not only the active one.
-  const allThreads = await listChatsByUser(userId);
-  const remainingUrls = new Set<string>();
-
-  for (const thread of allThreads) {
-    const threadMessages =
-      thread.chatId === chatId
-        ? mergedMessages
-        : await loadMessagesByUser(userId, thread.chatId);
-    for (const url of extractReceiptBlobUrls(threadMessages, userId)) {
-      remainingUrls.add(url);
-    }
-  }
-
-  const previousUrls = new Set(extractReceiptBlobUrls(previousMessages, userId));
-  const candidateOrphans = [...previousUrls].filter(
-    (url) => !remainingUrls.has(url),
-  );
-
-  // Receipt index is account-wide: do not delete indexed rows when a chat drops
-  // an attachment. Only remove blobs that nothing (chat or index) references.
-  if (process.env.BLOB_READ_WRITE_TOKEN && candidateOrphans.length > 0) {
-    const { del } = await import("@vercel/blob");
-    await Promise.all(
-      candidateOrphans.map(async (url) => {
-        const indexed = await countSharedReceiptsBySourceUrl(userId, url);
-        if (indexed > 0) {
-          return;
-        }
-
-        try {
-          await del(url);
-        } catch (error) {
-          console.error("Failed to delete orphaned receipt blob:", url, error);
-        }
-      }),
-    );
-  }
+  // Receipt index is account-wide: only remove blobs nothing else references.
+  const previousUrls = extractReceiptBlobUrls(previousMessages, userId);
+  await cleanupOrphanedReceiptBlobs(userId, previousUrls);
 }

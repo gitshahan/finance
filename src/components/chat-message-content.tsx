@@ -13,6 +13,7 @@ import type {
 } from "@/lib/chat-csv-export";
 import {
   getReceiptImageProxyUrl,
+  isCsvFilename,
   isLikelyReceiptBlobUrl,
 } from "@/lib/receipt-image-url";
 
@@ -21,10 +22,36 @@ type ChatMessageContentProps = {
   isLoading?: boolean;
 };
 
-function isRenderableImagePart(
+function isCsvFilePart(
   part: UIMessage["parts"][number],
 ): part is Extract<UIMessage["parts"][number], { type: "file" }> {
   if (part.type !== "file" || !part.url) {
+    return false;
+  }
+
+  if (
+    part.mediaType === "text/csv" ||
+    part.mediaType === "application/csv" ||
+    part.mediaType === "application/vnd.ms-excel"
+  ) {
+    return true;
+  }
+
+  if (part.filename && isCsvFilename(part.filename)) {
+    return true;
+  }
+
+  try {
+    return isCsvFilename(new URL(part.url).pathname);
+  } catch {
+    return isCsvFilename(part.url);
+  }
+}
+
+function isRenderableImagePart(
+  part: UIMessage["parts"][number],
+): part is Extract<UIMessage["parts"][number], { type: "file" }> {
+  if (part.type !== "file" || !part.url || isCsvFilePart(part)) {
     return false;
   }
 
@@ -89,6 +116,7 @@ export function ChatMessageContent({
   const hasRenderableContent = message.parts.some(
     (part) =>
       (part.type === "text" && part.text) ||
+      isCsvFilePart(part) ||
       isRenderableImagePart(part) ||
       isNamedToolPart(part, "generateCsvDownload") ||
       isNamedToolPart(part, "summarizeSpend") ||
@@ -127,6 +155,32 @@ export function ChatMessageContent({
             >
               {part.text}
             </p>
+          );
+        }
+
+        if (isCsvFilePart(part)) {
+          return (
+            <div
+              key={`${message.id}-csv-file-${index}`}
+              className={`inline-flex max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm ${
+                message.role === "user"
+                  ? "border-white/25 bg-white/10 text-white"
+                  : "border-border bg-surface text-foreground"
+              }`}
+            >
+              <span
+                className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wide ${
+                  message.role === "user"
+                    ? "bg-white/20"
+                    : "bg-brand-soft text-brand"
+                }`}
+              >
+                CSV
+              </span>
+              <span className="truncate font-medium">
+                {part.filename ?? "upload.csv"}
+              </span>
+            </div>
           );
         }
 

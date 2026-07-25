@@ -23,28 +23,28 @@ export function UserQuotaIndicator({ usage }: UserQuotaIndicatorProps) {
     ? "bg-red-600 dark:bg-red-400"
     : isLow
       ? "bg-amber-600 dark:bg-amber-400"
-      : "bg-emerald-600 dark:bg-emerald-400";
+      : "bg-brand";
 
   const labelClass = isExceeded
     ? "text-red-700 dark:text-red-300"
     : isLow
       ? "text-amber-800 dark:text-amber-200"
-      : "text-zinc-700 dark:text-zinc-300";
+      : "text-muted";
 
   return (
     <div
-      className="flex min-w-[10rem] flex-col gap-1.5 sm:min-w-[12rem]"
+      className="flex w-full min-w-0 flex-col gap-1.5"
       title={
         isExceeded
           ? "Usage limit reached"
           : `${usage.remainingTotalTokens.toLocaleString()} total tokens, ${usage.remainingOutputTokens.toLocaleString()} output tokens, ~${usage.remainingRequestsEstimate} requests remaining`
       }
     >
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <span className={`font-medium ${labelClass}`}>
+      <div className="flex items-center justify-between gap-2 text-[0.7rem] tracking-wide uppercase">
+        <span className={`font-semibold ${labelClass}`}>
           {isExceeded ? "Quota used" : "Quota remaining"}
         </span>
-        <span className={`tabular-nums font-semibold ${labelClass}`}>
+        <span className={`font-mono text-xs font-medium tabular-nums normal-case tracking-tight ${labelClass}`}>
           {isExceeded ? "0%" : `${percent}%`}
         </span>
       </div>
