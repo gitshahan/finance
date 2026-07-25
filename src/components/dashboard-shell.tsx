@@ -22,7 +22,7 @@ type DashboardShellProps = {
   initialTokenUsage: UserTokenUsage | null;
 };
 
-function MenuIcon() {
+function OpenSidebarIcon() {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -35,9 +35,8 @@ function MenuIcon() {
       className="h-5 w-5"
       aria-hidden="true"
     >
-      <path d="M4 6h16" />
-      <path d="M4 12h16" />
-      <path d="M4 18h16" />
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
     </svg>
   );
 }
@@ -180,51 +179,66 @@ export function DashboardShell({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
-          {chatPersistenceEnabled ? (
+    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {chatPersistenceEnabled ? (
+        <ChatSidebar
+          chats={chats}
+          activeChatId={activeChatId}
+          open={sidebarOpen}
+          tokenUsage={tokenUsage}
+          canCreate={activeChatHasMessages}
+          disabled={isPending}
+          onClose={() => setSidebarOpen(false)}
+          onSelect={handleSelectChat}
+          onCreate={() => void handleCreateChat()}
+          onDelete={(chatId) => void handleDeleteChat(chatId)}
+        />
+      ) : null}
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
+        <header className="relative z-10 flex shrink-0 items-center gap-3 border-b border-border/80 bg-surface px-3 py-2.5 shadow-[0_1px_0_rgba(15,39,68,0.04),0_4px_12px_rgba(15,39,68,0.06)] dark:shadow-[0_1px_0_rgba(0,0,0,0.2),0_4px_12px_rgba(0,0,0,0.25)]">
+          {chatPersistenceEnabled && !sidebarOpen ? (
             <button
               type="button"
-              onClick={() => setSidebarOpen((open) => !open)}
-              aria-label={sidebarOpen ? "Collapse chat list" : "Open chat list"}
-              aria-expanded={sidebarOpen}
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open chat list"
+              aria-expanded={false}
               aria-controls="chat-sidebar"
-              title={sidebarOpen ? "Collapse chats" : "Open chats"}
-              className="cursor-pointer rounded-lg border border-border bg-surface p-2 text-brand transition hover:bg-brand-soft dark:hover:bg-brand-muted"
+              title="Open chats"
+              className="cursor-pointer rounded-lg p-2 text-muted transition hover:bg-brand-soft hover:text-brand dark:hover:bg-brand-muted dark:hover:text-brand-strong"
             >
-              <MenuIcon />
+              <OpenSidebarIcon />
             </button>
           ) : null}
+
           {threadError ? (
-            <p className="text-sm text-red-700 dark:text-red-300">{threadError}</p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-          {!chatPersistenceEnabled ? (
-            <UserQuotaIndicator usage={tokenUsage} />
-          ) : null}
-          <UserButton />
-        </div>
-      </header>
+            <p className="min-w-0 flex-1 truncate text-sm text-red-700 dark:text-red-300">
+              {threadError}
+            </p>
+          ) : (
+            <div className="min-w-0 flex-1" />
+          )}
 
-      <div className="relative flex min-h-0 flex-1 gap-4 overflow-hidden">
-        {chatPersistenceEnabled ? (
-          <ChatSidebar
-            chats={chats}
-            activeChatId={activeChatId}
-            open={sidebarOpen}
-            tokenUsage={tokenUsage}
-            canCreate={activeChatHasMessages}
-            disabled={isPending}
-            onClose={() => setSidebarOpen(false)}
-            onSelect={handleSelectChat}
-            onCreate={() => void handleCreateChat()}
-            onDelete={(chatId) => void handleDeleteChat(chatId)}
-          />
-        ) : null}
+          <div className="flex shrink-0 items-center gap-4">
+            {!chatPersistenceEnabled ? (
+              <div className="hidden w-44 sm:block">
+                <UserQuotaIndicator usage={tokenUsage} />
+              </div>
+            ) : null}
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox:
+                    "rounded-full border border-border shadow-sm ring-0",
+                  userButtonTrigger:
+                    "cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-brand-ring",
+                },
+              }}
+            />
+          </div>
+        </header>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ChatInterface
             key={activeChatId}
             chatId={activeChatId}

@@ -49,7 +49,26 @@ function TrashIcon() {
   );
 }
 
-function CloseIcon() {
+function CollapseIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-5 w-5"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4v16" />
+    </svg>
+  );
+}
+
+function NewChatIcon() {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -62,8 +81,8 @@ function CloseIcon() {
       className="h-4 w-4"
       aria-hidden="true"
     >
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
     </svg>
   );
 }
@@ -96,13 +115,13 @@ export function ChatSidebar({
       <aside
         id="chat-sidebar"
         aria-hidden={!open}
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col overflow-hidden border-r border-border bg-surface shadow-xl transition-transform duration-200 ease-out md:static md:z-auto md:max-w-none md:shadow-none md:rounded-2xl md:border ${
+        className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-72 max-w-[85vw] flex-col overflow-hidden border-r border-border bg-surface shadow-xl transition-[transform,width,opacity] duration-200 ease-out md:static md:z-auto md:h-full md:max-w-none md:shadow-none ${
           open
             ? "translate-x-0 md:w-64 md:shrink-0"
             : "-translate-x-full md:pointer-events-none md:w-0 md:translate-x-0 md:border-0 md:opacity-0"
         }`}
       >
-        <div className="border-b border-border bg-brand-soft/50 px-3 py-3">
+        <div className="shrink-0 px-3 pt-3 pb-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
               <img
@@ -116,35 +135,33 @@ export function ChatSidebar({
                 Autonicals Finance
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-1">
-              {canCreate ? (
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={onCreate}
-                  aria-label="New chat"
-                  title="New chat"
-                  className="cursor-pointer rounded-md px-2 py-1 text-xs font-medium text-brand transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-brand-muted"
-                >
-                  + New
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Collapse chat list"
-                title="Collapse"
-                className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition hover:bg-white/70 hover:text-brand dark:hover:bg-brand-muted dark:hover:text-brand-strong"
-              >
-                <CloseIcon />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Collapse chat list"
+              title="Collapse sidebar"
+              className="cursor-pointer rounded-lg p-2 text-muted transition hover:bg-brand-soft hover:text-brand dark:hover:bg-brand-muted dark:hover:text-brand-strong"
+            >
+              <CollapseIcon />
+            </button>
           </div>
+
+          {canCreate ? (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onCreate}
+              className="mt-3 flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm font-medium text-foreground transition hover:bg-brand-soft disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-brand-muted"
+            >
+              <NewChatIcon />
+              New chat
+            </button>
+          ) : null}
         </div>
 
         <nav
           aria-label="Past chats"
-          className="min-h-0 flex-1 overflow-y-auto p-2"
+          className="min-h-0 flex-1 overflow-y-auto px-2 pb-2"
         >
           {chats.length === 0 ? (
             <p className="px-2 py-3 text-xs text-zinc-500 dark:text-zinc-400">

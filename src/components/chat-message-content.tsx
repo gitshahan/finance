@@ -128,7 +128,8 @@ export function ChatMessageContent({
       isNamedToolPart(part, "confirmSavedReceipt") ||
       isNamedToolPart(part, "updateSavedReceipt") ||
       isNamedToolPart(part, "deleteSavedReceipt") ||
-      isNamedToolPart(part, "setMerchantCategory"),
+      isNamedToolPart(part, "setMerchantCategory") ||
+      isNamedToolPart(part, "web_search"),
   );
 
   if (!hasRenderableContent) {
@@ -202,6 +203,26 @@ export function ChatMessageContent({
               className="max-h-64 w-full rounded-lg border border-zinc-200 object-contain dark:border-zinc-700"
             />
           );
+        }
+
+        if (isNamedToolPart(part, "web_search")) {
+          const toolPart = part as UIMessage["parts"][number] & ToolPart;
+
+          if (
+            toolPart.state === "input-streaming" ||
+            toolPart.state === "input-available"
+          ) {
+            return (
+              <ToolStatus
+                key={`${message.id}-web-${index}`}
+                messageId={message.id}
+                index={index}
+                label="Looking up current prices…"
+              />
+            );
+          }
+
+          return null;
         }
 
         if (isNamedToolPart(part, "summarizeSpend")) {
