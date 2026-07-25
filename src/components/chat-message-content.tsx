@@ -22,13 +22,13 @@ type ChatMessageContentProps = {
   isLoading?: boolean;
 };
 
-function isCsvFilePart(
-  part: UIMessage["parts"][number],
-): part is Extract<UIMessage["parts"][number], { type: "file" }> {
-  if (part.type !== "file" || !part.url) {
-    return false;
-  }
+type FilePart = Extract<UIMessage["parts"][number], { type: "file" }>;
 
+function isFilePart(part: UIMessage["parts"][number]): part is FilePart {
+  return part.type === "file" && Boolean(part.url);
+}
+
+function filePartLooksLikeCsv(part: FilePart): boolean {
   if (
     part.mediaType === "text/csv" ||
     part.mediaType === "application/csv" ||
@@ -48,10 +48,14 @@ function isCsvFilePart(
   }
 }
 
+function isCsvFilePart(part: UIMessage["parts"][number]): boolean {
+  return isFilePart(part) && filePartLooksLikeCsv(part);
+}
+
 function isRenderableImagePart(
   part: UIMessage["parts"][number],
-): part is Extract<UIMessage["parts"][number], { type: "file" }> {
-  if (part.type !== "file" || !part.url || isCsvFilePart(part)) {
+): part is FilePart {
+  if (!isFilePart(part) || filePartLooksLikeCsv(part)) {
     return false;
   }
 
@@ -158,7 +162,7 @@ export function ChatMessageContent({
           );
         }
 
-        if (isCsvFilePart(part)) {
+        if (isFilePart(part) && filePartLooksLikeCsv(part)) {
           return (
             <div
               key={`${message.id}-csv-file-${index}`}
