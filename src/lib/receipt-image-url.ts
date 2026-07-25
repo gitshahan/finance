@@ -37,22 +37,10 @@ export function getFileExtension(filename: string): string | null {
   return extension;
 }
 
-/** Allowlisted extension for blob storage keys, or null if unsupported. */
+/** Allowlisted extension for new uploads (CSV only), or null if unsupported. */
 export function getAllowedUploadExtension(filename: string): string | null {
   const extension = getFileExtension(filename);
-  if (!extension) {
-    return null;
-  }
-
-  if (extension === "csv") {
-    return "csv";
-  }
-
-  if (IMAGE_EXTENSIONS.has(extension)) {
-    return extension === "jpeg" ? "jpg" : extension;
-  }
-
-  return null;
+  return extension === "csv" ? "csv" : null;
 }
 
 export function guessImageContentType(filename: string) {
@@ -93,26 +81,25 @@ export function isCsvFile(file: File) {
 }
 
 export function isSupportedReceiptUpload(file: File) {
-  return getAllowedUploadExtension(file.name) !== null && (isImageFile(file) || isCsvFile(file));
+  return isCsvFile(file) && getAllowedUploadExtension(file.name) !== null;
 }
 
-export const MAX_RECEIPT_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024;
 export const MAX_RECEIPT_CSV_UPLOAD_BYTES = 1 * 1024 * 1024;
 
-export function getReceiptUploadMaxBytes(file: File) {
-  return isImageFile(file)
-    ? MAX_RECEIPT_IMAGE_UPLOAD_BYTES
-    : MAX_RECEIPT_CSV_UPLOAD_BYTES;
+export function getReceiptUploadMaxBytes(_file?: File) {
+  return MAX_RECEIPT_CSV_UPLOAD_BYTES;
 }
 
 export function getReceiptUploadSizeLimitError(file: File): string | null {
-  if (file.size <= getReceiptUploadMaxBytes(file)) {
+  if (!isSupportedReceiptUpload(file)) {
+    return "Only CSV files under 1MB are supported.";
+  }
+
+  if (file.size <= MAX_RECEIPT_CSV_UPLOAD_BYTES) {
     return null;
   }
 
-  return isImageFile(file)
-    ? "File exceeds 5MB limit."
-    : "File exceeds 1MB limit.";
+  return "CSV file must be smaller than 1MB.";
 }
 
 export function isCsvFilename(filename: string) {
@@ -131,16 +118,7 @@ export function guessReceiptUploadContentType(filename: string) {
  * Content-Type derived only from allowlisted extension — never from client MIME.
  */
 export function getForcedUploadContentType(filename: string): string | null {
-  const extension = getAllowedUploadExtension(filename);
-  if (!extension) {
-    return null;
-  }
-
-  if (extension === "csv") {
-    return "text/csv";
-  }
-
-  return guessImageContentType(`.${extension}`);
+  return getAllowedUploadExtension(filename) === "csv" ? "text/csv" : null;
 }
 
 export function isLikelyReceiptBlobUrl(url: string) {

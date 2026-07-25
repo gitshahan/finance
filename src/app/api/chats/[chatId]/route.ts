@@ -1,5 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
+import { after } from "next/server";
 import {
+  cleanupOrphanedReceiptBlobs,
   DEFAULT_CHAT_ID,
   deleteChatForUser,
   isChatPersistenceConfigured,
@@ -89,6 +91,14 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const result = await deleteChatForUser(userId, chatId);
   if (!result.ok) {
     return new Response(result.error, { status: 400 });
+  }
+
+  // Don't block the delete response on blob storage cleanup.
+  const orphanUrls = result.orphanCandidateUrls;
+  if (orphanUrls.length > 0) {
+    after(() => {
+      void cleanupOrphanedReceiptBlobs(userId, orphanUrls);
+    });
   }
 
   return Response.json({ ok: true });

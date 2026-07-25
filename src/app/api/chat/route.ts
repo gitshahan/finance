@@ -63,16 +63,24 @@ function isValidChatMessages(messages: unknown): messages is UIMessage[] {
   );
 }
 
-function emptyUsage(): TokenReservation {
-  return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+function messageHasFilePart(message: UIMessage) {
+  return message.parts.some(
+    (part) => part.type === "file" && Boolean(part.url),
+  );
 }
 
-function addUsage(a: TokenReservation, b: TokenReservation): TokenReservation {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
-  };
+/** New chats must open with a shared file; follow-ups may be text-only. */
+function isAllowedToStartOrContinueChat(messages: UIMessage[]) {
+  const userMessages = messages.filter((message) => message.role === "user");
+  if (userMessages.length === 0) {
+    return false;
+  }
+
+  if (userMessages.length === 1) {
+    return messageHasFilePart(userMessages[0]);
+  }
+
+  return true;
 }
 
 export async function POST(request: Request) {
@@ -120,6 +128,13 @@ export async function POST(request: Request) {
       return new Response("Invalid or oversized chat payload.", { status: 400 });
     }
 
+    if (!isAllowedToStartOrContinueChat(messages)) {
+      return new Response(
+        "Start the chat by uploading a CSV file (under 1MB).",
+        { status: 400 },
+      );
+    }
+
     if (!messagesOnlyUseOwnedReceiptBlobs(userId, messages)) {
       return new Response("Forbidden", { status: 403 });
     }
@@ -157,34 +172,22 @@ export async function POST(request: Request) {
       );
     }
 
-    let extractionUsage = emptyUsage();
-    let extractionsRemaining = MAX_NEW_EXTRACTIONS_PER_REQUEST;
-
-    if (isChatPersistenceConfigured()) {
-      const syncResult = await syncNewReceiptsFromMessages(userId, messages, {
-        maxNewExtractions: extractionsRemaining,
-      });
-      extractionUsage = addUsage(extractionUsage, syncResult.usage);
-      extractionsRemaining = Math.max(
-        0,
-        extractionsRemaining - syncResult.extractedCount,
-      );
-    }
-
-    const system = await buildChatSystemPrompt(userId);
-    // Trim to a sliding window before re-inlining blobs so old image turns are
-    // not re-fetched/re-sent each request. Full thread is still persisted below.
+    // Index receipts after the reply starts so first tokens aren't blocked on
+    // blob/DB sync. Attached CSV text is inlined for the model below.
     const windowedMessages = applyHistoryWindow(messages);
-    const modelMessages = await convertToModelMessages(
-      await prepareMessagesForModel(userId, windowedMessages),
-    );
+    const [system, preparedMessages] = await Promise.all([
+      buildChatSystemPrompt(userId),
+      prepareMessagesForModel(userId, windowedMessages),
+    ]);
+    const modelMessages = await convertToModelMessages(preparedMessages);
 
     const result = streamText({
       model: CHAT_MODEL,
       system,
       messages: modelMessages,
       tools: createChatTools({ userId, messages }),
-      stopWhen: stepCountIs(8),
+      // Keep tool loops short — initial CSV analysis should be a single text reply.
+      stopWhen: stepCountIs(4),
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       onFinish: async ({ totalUsage }) => {
         const chatUsage: TokenReservation = {
@@ -194,11 +197,7 @@ export async function POST(request: Request) {
             totalUsage.totalTokens ??
             (totalUsage.inputTokens ?? 0) + (totalUsage.outputTokens ?? 0),
         };
-        await reconcileReservedTokenUsage(
-          userId,
-          reservation,
-          addUsage(chatUsage, extractionUsage),
-        );
+        await reconcileReservedTokenUsage(userId, reservation, chatUsage);
       },
     });
 
@@ -210,19 +209,17 @@ export async function POST(request: Request) {
       }),
       onFinish: async ({ messages: completedMessages }) => {
         if (isChatPersistenceConfigured()) {
-          if (extractionsRemaining > 0) {
-            const syncResult = await syncNewReceiptsFromMessages(
-              userId,
-              completedMessages,
-              { maxNewExtractions: extractionsRemaining },
-            );
-            // Late extractions were not in the pre-debit; bill them separately.
-            if (syncResult.extractedCount > 0) {
-              await addUserTokenUsage(userId, {
-                ...syncResult.usage,
-                skipRequestIncrement: true,
-              });
-            }
+          const syncResult = await syncNewReceiptsFromMessages(
+            userId,
+            completedMessages,
+            { maxNewExtractions: MAX_NEW_EXTRACTIONS_PER_REQUEST },
+          );
+          // Extractions were not in the chat reservation; bill them separately.
+          if (syncResult.extractedCount > 0) {
+            await addUserTokenUsage(userId, {
+              ...syncResult.usage,
+              skipRequestIncrement: true,
+            });
           }
           await replaceMessagesByUser(userId, completedMessages, chatId);
         }

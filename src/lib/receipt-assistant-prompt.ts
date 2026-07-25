@@ -9,22 +9,24 @@ Image shared:
 
 CSV shared:
 - Treat as tabular receipt/transaction data; use only present rows/columns.
-- When asked, summarize columns, date range, merchants, totals. Invent no rows or amounts.
-- Rows are indexed into saved memory when possible; use tools for follow-up questions across sessions.
+- When a CSV is attached in the current user message, its contents are already inlined for you — answer from that text immediately. Do NOT call tools for the initial summary/analysis.
+- Summarize columns, date range, merchants, and totals in one reply. Invent no rows or amounts.
+- Skip generateCsvDownload unless the user explicitly asks to export/download.
+- Rows are indexed into saved memory in the background; use tools only for later questions about saved history (not for the just-attached file).
 - If empty, malformed, or unrelated, say so.
 
-Saved receipt memory (tools — required for lookups):
-- The system prompt only includes a short index summary. For any historical question, CALL tools:
+Saved receipt memory (tools — for history, not the current attachment):
+- The system prompt only includes a short index summary. For historical questions about previously saved receipts, CALL tools:
   - searchSavedReceipts: list matching saved receipts (merchant, category, search, date range).
   - summarizeSpend: totals grouped by merchant, category, or month.
   - generateCsvDownload with filterFromSavedReceipts to export matching saved rows.
   - updateSavedReceipt / confirmSavedReceipt / deleteSavedReceipt to correct or remove indexed facts.
   - setMerchantCategory to remember how a merchant should be categorized (e.g. Netflix → Entertainment).
 - Never invent merchants, amounts, or dates. If tools return no matches, say you don't have that info.
-- Prefer tools over guessing from the short summary alone.
+- Prefer tools over guessing from the short summary alone — but only when the answer is not already in the current message's CSV text.
 
 Export/download CSV requests:
-- You cannot attach files; you MUST call generateCsvDownload.
+- Only when the user asks to export/download. You cannot attach files; you MUST call generateCsvDownload.
 - For an attached CSV still in the chat, use filterFromAttachments with search terms.
 - For saved/indexed receipts, use filterFromSavedReceipts (merchant/category/search/dates).
 - Only for tiny ad-hoc exports (<30 rows) pass inline headers/rows.
@@ -46,7 +48,7 @@ export function buildReceiptAssistantSystemPrompt(
   if (!savedReceiptsContext) {
     return `${RECEIPT_ASSISTANT_BASE_PROMPT}
 
-Saved receipt index: none yet. Ask the user to share a receipt image or CSV.`;
+Saved receipt index: none yet. Ask the user to upload a CSV of receipt/transaction data (under 1MB).`;
   }
 
   return `${RECEIPT_ASSISTANT_BASE_PROMPT}

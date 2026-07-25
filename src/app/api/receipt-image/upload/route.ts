@@ -33,10 +33,9 @@ export async function POST(request: Request) {
     }
 
     if (!isSupportedReceiptUpload(file)) {
-      return new Response(
-        "Only image files (JPEG, PNG, WebP, etc.) and CSV files are supported.",
-        { status: 400 },
-      );
+      return new Response("Only CSV files under 1MB are supported.", {
+        status: 400,
+      });
     }
 
     const sizeLimitError = getReceiptUploadSizeLimitError(file);
@@ -48,10 +47,9 @@ export async function POST(request: Request) {
     const contentType = getForcedUploadContentType(file.name);
 
     if (!fileExtension || !contentType) {
-      return new Response(
-        "Only image files (JPEG, PNG, WebP, etc.) and CSV files are supported.",
-        { status: 400 },
-      );
+      return new Response("Only CSV files under 1MB are supported.", {
+        status: 400,
+      });
     }
 
     const blobPath = `${getReceiptBlobPathPrefix(userId)}${crypto.randomUUID()}.${fileExtension}`;

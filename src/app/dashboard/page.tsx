@@ -33,7 +33,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   let initialChats: ChatThread[] = [
     {
       chatId: DEFAULT_CHAT_ID,
-      title: "New chat",
+      title: "Main chat",
       updatedAt: new Date(0).toISOString(),
     },
   ];
@@ -63,8 +63,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 p-4 dark:bg-black sm:p-6">
-      <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col overflow-hidden">
+    <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background p-4 sm:p-6">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-hidden">
         <DashboardShell
           initialMessages={initialMessages}
           initialChats={initialChats}

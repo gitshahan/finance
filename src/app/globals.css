@@ -1,26 +1,125 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+@theme {
+  --color-brand: #0058b8;
+  --color-brand-strong: #003a8c;
+  --color-brand-accent: #00b4e6;
+  --color-brand-soft: #e8f3fc;
+  --color-brand-muted: #d0e6f8;
+  --color-brand-ring: #3d8fd9;
+  --color-background: #f4f8fc;
+  --color-foreground: #0f2744;
+  --color-surface: #ffffff;
+  --color-surface-muted: #eef5fb;
+  --color-border: #c9d9ea;
+  --color-muted: #5a7390;
+  --font-sans: var(--font-plus-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-sora), var(--font-plus-jakarta), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), ui-monospace, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --color-brand: #3d9aef;
+    --color-brand-strong: #7ec4ff;
+    --color-brand-accent: #33d0f5;
+    --color-brand-soft: #102a45;
+    --color-brand-muted: #163552;
+    --color-brand-ring: #4aa3e8;
+    --color-background: #07111d;
+    --color-foreground: #e8f1fa;
+    --color-surface: #0d1a2b;
+    --color-surface-muted: #122338;
+    --color-border: #243952;
+    --color-muted: #9bb0c7;
   }
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01" on, "cv11" on;
+  letter-spacing: -0.011em;
+  line-height: 1.5;
+}
+
+@layer utilities {
+  .tracking-display {
+    letter-spacing: -0.03em;
+  }
+}
+
+@layer components {
+  .prose-chat {
+    font-size: 0.9375rem;
+    line-height: 1.65;
+    letter-spacing: -0.01em;
+  }
+
+  .prose-chat :where(p, ul, ol, table) {
+    margin-block: 0.65em;
+  }
+
+  .prose-chat :where(p, ul, ol, table):first-child {
+    margin-block-start: 0;
+  }
+
+  .prose-chat :where(p, ul, ol, table):last-child {
+    margin-block-end: 0;
+  }
+
+  .prose-chat :where(h3, h4) {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.3;
+    margin-block: 0.9em 0.4em;
+  }
+
+  .prose-chat :where(h3, h4):first-child {
+    margin-block-start: 0;
+  }
+
+  .prose-chat :where(strong) {
+    font-weight: 600;
+    color: inherit;
+  }
+
+  .prose-chat :where(ul) {
+    list-style: disc;
+    padding-inline-start: 1.25em;
+  }
+
+  .prose-chat :where(ol) {
+    list-style: decimal;
+    padding-inline-start: 1.25em;
+  }
+
+  .prose-chat :where(li + li) {
+    margin-block-start: 0.25em;
+  }
+
+  .prose-chat :where(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .prose-chat :where(th, td) {
+    border: 1px solid var(--color-border);
+    padding: 0.4em 0.55em;
+    text-align: left;
+  }
+
+  .prose-chat :where(th) {
+    font-family: var(--font-display);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    background: var(--color-surface-muted);
+  }
 }
