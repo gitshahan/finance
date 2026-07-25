@@ -4,6 +4,14 @@ const MAX_TOTAL_TOKENS = 1_000_000;
 const MAX_OUTPUT_TOKENS = 286_000;
 const MAX_REQUEST_COUNT = 550;
 
+/** Conservative pre-debit for one chat completion (input + tools + history window). */
+export const CHAT_RESERVE_INPUT_TOKENS = 12_000;
+/** Matches streamText maxOutputTokens in the chat route. */
+export const CHAT_RESERVE_OUTPUT_TOKENS = 1_500;
+/** Vision extraction is expensive; reserve before generateObject. */
+export const EXTRACTION_RESERVE_INPUT_TOKENS = 7_200;
+export const EXTRACTION_RESERVE_OUTPUT_TOKENS = 800;
+
 function percentRemaining(remaining: number, max: number) {
   if (max <= 0) {
     return 100;
@@ -28,6 +36,12 @@ export type UserTokenUsage = {
   isQuotaExceeded: boolean;
 };
 
+export type TokenReservation = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 type UserTokenUsageRow = {
   user_id: string;
   total_input_tokens: string;
@@ -42,6 +56,14 @@ function toSafeNonNegativeInt(value: number | undefined) {
   }
 
   return Math.max(0, Math.trunc(value));
+}
+
+function toSafeInt(value: number | undefined) {
+  if (value === undefined || Number.isNaN(value)) {
+    return 0;
+  }
+
+  return Math.trunc(value);
 }
 
 function buildUsageSummary(
@@ -96,6 +118,20 @@ export function isTokenUsageConfigured() {
   return isDatabaseConfigured();
 }
 
+export function buildChatBudgetReservation(extractionCount: number): TokenReservation {
+  const extractions = Math.max(0, Math.trunc(extractionCount));
+  const inputTokens =
+    CHAT_RESERVE_INPUT_TOKENS + EXTRACTION_RESERVE_INPUT_TOKENS * extractions;
+  const outputTokens =
+    CHAT_RESERVE_OUTPUT_TOKENS + EXTRACTION_RESERVE_OUTPUT_TOKENS * extractions;
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
+}
+
 export async function ensureTokenUsageTable() {
   const sql = getSqlClient();
 
@@ -134,14 +170,30 @@ export async function getUserTokenUsage(userId: string): Promise<UserTokenUsage>
 }
 
 /**
- * Atomically reserve one request slot if under the request limit.
- * Returns updated usage, or null if the request quota is already exhausted.
+ * Atomically reserve one request slot plus an estimated token budget.
+ * Returns updated usage, or null if the request/token quota cannot cover the reservation.
  */
-export async function tryReserveChatRequest(
+export async function tryReserveChatBudget(
   userId: string,
+  reservation: TokenReservation,
 ): Promise<UserTokenUsage | null> {
   if (!isTokenUsageConfigured()) {
-    return buildUsageSummary(userId, null);
+    return null;
+  }
+
+  const inputTokens = toSafeNonNegativeInt(reservation.inputTokens);
+  const outputTokens = toSafeNonNegativeInt(reservation.outputTokens);
+  const totalTokens = toSafeNonNegativeInt(
+    reservation.totalTokens || inputTokens + outputTokens,
+  );
+
+  // INSERT path has no WHERE clause — reject impossible single-request reservations.
+  if (
+    totalTokens > MAX_TOTAL_TOKENS ||
+    outputTokens > MAX_OUTPUT_TOKENS ||
+    MAX_REQUEST_COUNT < 1
+  ) {
+    return null;
   }
 
   await ensureTokenUsageTable();
@@ -155,11 +207,22 @@ export async function tryReserveChatRequest(
       total_tokens,
       request_count
     )
-    VALUES (${userId}, 0, 0, 0, 1)
+    VALUES (
+      ${userId},
+      ${inputTokens},
+      ${outputTokens},
+      ${totalTokens},
+      1
+    )
     ON CONFLICT (user_id) DO UPDATE SET
+      total_input_tokens = user_token_usage.total_input_tokens + EXCLUDED.total_input_tokens,
+      total_output_tokens = user_token_usage.total_output_tokens + EXCLUDED.total_output_tokens,
+      total_tokens = user_token_usage.total_tokens + EXCLUDED.total_tokens,
       request_count = user_token_usage.request_count + 1,
       updated_at = NOW()
     WHERE user_token_usage.request_count < ${MAX_REQUEST_COUNT}
+      AND user_token_usage.total_tokens + EXCLUDED.total_tokens <= ${MAX_TOTAL_TOKENS}
+      AND user_token_usage.total_output_tokens + EXCLUDED.total_output_tokens <= ${MAX_OUTPUT_TOKENS}
     RETURNING
       user_id,
       total_input_tokens,
@@ -173,6 +236,66 @@ export async function tryReserveChatRequest(
   }
 
   return buildUsageSummary(userId, rows[0]!);
+}
+
+/**
+ * Adjust counters from a prior reservation to actual usage (delta may be negative).
+ * Does not change request_count.
+ */
+export async function reconcileReservedTokenUsage(
+  userId: string,
+  reserved: TokenReservation,
+  actual: TokenReservation,
+) {
+  if (!isTokenUsageConfigured()) {
+    return;
+  }
+
+  const inputDelta =
+    toSafeNonNegativeInt(actual.inputTokens) - toSafeNonNegativeInt(reserved.inputTokens);
+  const outputDelta =
+    toSafeNonNegativeInt(actual.outputTokens) -
+    toSafeNonNegativeInt(reserved.outputTokens);
+  const totalDelta =
+    toSafeNonNegativeInt(actual.totalTokens) - toSafeNonNegativeInt(reserved.totalTokens);
+
+  if (inputDelta === 0 && outputDelta === 0 && totalDelta === 0) {
+    return;
+  }
+
+  await ensureTokenUsageTable();
+  const sql = getSqlClient();
+
+  await sql`
+    INSERT INTO user_token_usage (
+      user_id,
+      total_input_tokens,
+      total_output_tokens,
+      total_tokens,
+      request_count
+    )
+    VALUES (
+      ${userId},
+      ${Math.max(0, toSafeInt(actual.inputTokens))},
+      ${Math.max(0, toSafeInt(actual.outputTokens))},
+      ${Math.max(0, toSafeInt(actual.totalTokens))},
+      0
+    )
+    ON CONFLICT (user_id) DO UPDATE SET
+      total_input_tokens = GREATEST(
+        0,
+        user_token_usage.total_input_tokens + ${inputDelta}
+      ),
+      total_output_tokens = GREATEST(
+        0,
+        user_token_usage.total_output_tokens + ${outputDelta}
+      ),
+      total_tokens = GREATEST(
+        0,
+        user_token_usage.total_tokens + ${totalDelta}
+      ),
+      updated_at = NOW()
+  `;
 }
 
 export async function addUserTokenUsage(

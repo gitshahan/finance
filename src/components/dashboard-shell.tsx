@@ -10,12 +10,14 @@ import type { UserTokenUsage } from "@/lib/token-usage-store";
 type DashboardShellProps = {
   initialMessages: UIMessage[];
   chatPersistenceEnabled: boolean;
+  usageTrackingEnabled: boolean;
   initialTokenUsage: UserTokenUsage | null;
 };
 
 export function DashboardShell({
   initialMessages,
   chatPersistenceEnabled,
+  usageTrackingEnabled,
   initialTokenUsage,
 }: DashboardShellProps) {
   const [tokenUsage, setTokenUsage] = useState<UserTokenUsage | null>(
@@ -38,6 +40,7 @@ export function DashboardShell({
         <ChatInterface
           initialMessages={initialMessages}
           chatPersistenceEnabled={chatPersistenceEnabled}
+          usageTrackingEnabled={usageTrackingEnabled}
           tokenUsage={tokenUsage}
           onTokenUsageChange={setTokenUsage}
         />

@@ -7,11 +7,13 @@ import {
 } from "@/lib/chat-store";
 import {
   getUserTokenUsage,
+  isTokenUsageConfigured,
   type UserTokenUsage,
 } from "@/lib/token-usage-store";
 
 export default async function DashboardPage() {
   const { userId } = await auth();
+  const usageTrackingEnabled = isTokenUsageConfigured();
   let chatPersistenceEnabled = isChatPersistenceConfigured();
   let initialMessages: UIMessage[] = [];
   let tokenUsage: UserTokenUsage | null = null;
@@ -40,6 +42,7 @@ export default async function DashboardPage() {
         <DashboardShell
           initialMessages={initialMessages}
           chatPersistenceEnabled={chatPersistenceEnabled}
+          usageTrackingEnabled={usageTrackingEnabled}
           initialTokenUsage={tokenUsage}
         />
       </div>

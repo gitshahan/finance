@@ -16,11 +16,19 @@ import {
   messagesOnlyUseOwnedReceiptBlobs,
   prepareMessagesForModel,
 } from "@/lib/receipt-blob";
-import { syncNewReceiptsFromMessages } from "@/lib/receipt-extraction";
+import {
+  countCandidateReceiptExtractions,
+  MAX_NEW_EXTRACTIONS_PER_REQUEST,
+  syncNewReceiptsFromMessages,
+} from "@/lib/receipt-extraction";
 import {
   addUserTokenUsage,
+  buildChatBudgetReservation,
   getUserTokenUsage,
-  tryReserveChatRequest,
+  isTokenUsageConfigured,
+  reconcileReservedTokenUsage,
+  tryReserveChatBudget,
+  type TokenReservation,
 } from "@/lib/token-usage-store";
 import { CHAT_MODEL } from "@/lib/ai-model";
 import { createChatTools } from "@/lib/chat-tools";
@@ -29,6 +37,7 @@ export const maxDuration = 60;
 
 const MAX_CHAT_MESSAGES = 200;
 const MAX_MESSAGE_PARTS = 40;
+const CHAT_MAX_OUTPUT_TOKENS = 1500;
 
 type ChatRequestBody = {
   messages: UIMessage[];
@@ -51,6 +60,18 @@ function isValidChatMessages(messages: unknown): messages is UIMessage[] {
   );
 }
 
+function emptyUsage(): TokenReservation {
+  return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+}
+
+function addUsage(a: TokenReservation, b: TokenReservation): TokenReservation {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
@@ -65,6 +86,14 @@ export async function POST(request: Request) {
         {
           status: 500,
         },
+      );
+    }
+
+    // Fail closed: never serve AI without a durable quota store.
+    if (!isTokenUsageConfigured()) {
+      return new Response(
+        "Usage tracking is not configured (missing DATABASE_URL). Chat is disabled until quotas can be enforced.",
+        { status: 503 },
       );
     }
 
@@ -97,7 +126,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const reservedUsage = await tryReserveChatRequest(userId);
+    const candidateExtractions = countCandidateReceiptExtractions(userId, messages);
+    const plannedExtractions = Math.min(
+      candidateExtractions,
+      MAX_NEW_EXTRACTIONS_PER_REQUEST,
+    );
+    const reservation = buildChatBudgetReservation(plannedExtractions);
+    const reservedUsage = await tryReserveChatBudget(userId, reservation);
 
     if (!reservedUsage) {
       const latestUsage = await getUserTokenUsage(userId);
@@ -111,22 +146,18 @@ export async function POST(request: Request) {
       );
     }
 
-    if (
-      reservedUsage.totalTokens >= reservedUsage.maxTotalTokens ||
-      reservedUsage.totalOutputTokens >= reservedUsage.maxOutputTokens
-    ) {
-      return Response.json(
-        {
-          error:
-            "Usage limit reached. You have used your allocated token budget for this account.",
-          usage: reservedUsage,
-        },
-        { status: 429 },
-      );
-    }
+    let extractionUsage = emptyUsage();
+    let extractionsRemaining = MAX_NEW_EXTRACTIONS_PER_REQUEST;
 
     if (isChatPersistenceConfigured()) {
-      await syncNewReceiptsFromMessages(userId, messages);
+      const syncResult = await syncNewReceiptsFromMessages(userId, messages, {
+        maxNewExtractions: extractionsRemaining,
+      });
+      extractionUsage = addUsage(extractionUsage, syncResult.usage);
+      extractionsRemaining = Math.max(
+        0,
+        extractionsRemaining - syncResult.extractedCount,
+      );
     }
 
     const system = await buildChatSystemPrompt(userId);
@@ -143,14 +174,20 @@ export async function POST(request: Request) {
       messages: modelMessages,
       tools: createChatTools({ userId, messages }),
       stopWhen: stepCountIs(5),
-      maxOutputTokens: 1500,
+      maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       onFinish: async ({ totalUsage }) => {
-        await addUserTokenUsage(userId, {
-          inputTokens: totalUsage.inputTokens,
-          outputTokens: totalUsage.outputTokens,
-          totalTokens: totalUsage.totalTokens,
-          skipRequestIncrement: true,
-        });
+        const chatUsage: TokenReservation = {
+          inputTokens: totalUsage.inputTokens ?? 0,
+          outputTokens: totalUsage.outputTokens ?? 0,
+          totalTokens:
+            totalUsage.totalTokens ??
+            (totalUsage.inputTokens ?? 0) + (totalUsage.outputTokens ?? 0),
+        };
+        await reconcileReservedTokenUsage(
+          userId,
+          reservation,
+          addUsage(chatUsage, extractionUsage),
+        );
       },
     });
 
@@ -162,7 +199,20 @@ export async function POST(request: Request) {
       }),
       onFinish: async ({ messages: completedMessages }) => {
         if (isChatPersistenceConfigured()) {
-          await syncNewReceiptsFromMessages(userId, completedMessages);
+          if (extractionsRemaining > 0) {
+            const syncResult = await syncNewReceiptsFromMessages(
+              userId,
+              completedMessages,
+              { maxNewExtractions: extractionsRemaining },
+            );
+            // Late extractions were not in the pre-debit; bill them separately.
+            if (syncResult.extractedCount > 0) {
+              await addUserTokenUsage(userId, {
+                ...syncResult.usage,
+                skipRequestIncrement: true,
+              });
+            }
+          }
           await replaceMessagesByUser(userId, completedMessages);
         }
       },

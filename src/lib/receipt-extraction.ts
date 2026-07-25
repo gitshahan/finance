@@ -12,7 +12,10 @@ import {
   insertSharedReceipt,
   type InsertSharedReceiptInput,
 } from "@/lib/shared-data-store";
-import { addUserTokenUsage } from "@/lib/token-usage-store";
+import type { TokenReservation } from "@/lib/token-usage-store";
+
+/** Cap vision generateObject calls per chat request to limit cost amplification. */
+export const MAX_NEW_EXTRACTIONS_PER_REQUEST = 2;
 
 const receiptExtractionSchema = z.object({
   isReceipt: z.boolean(),
@@ -108,10 +111,31 @@ function toInsertInput(
   };
 }
 
-export async function extractReceiptFromImage(
+function emptyUsage(): TokenReservation {
+  return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+}
+
+function addUsage(a: TokenReservation, b: TokenReservation): TokenReservation {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  };
+}
+
+/** Count image blob URLs that may need vision indexing (excludes CSV). */
+export function countCandidateReceiptExtractions(
   userId: string,
+  messages: UIMessage[],
+): number {
+  return extractReceiptBlobUrls(messages, userId).filter(
+    (url) => !isCsvBlobUrl(url),
+  ).length;
+}
+
+export async function extractReceiptFromImage(
   imageDataUrl: string,
-): Promise<ReceiptExtraction> {
+): Promise<{ object: ReceiptExtraction; usage: TokenReservation }> {
   const { object, usage } = await generateObject({
     model: CHAT_MODEL,
     schema: zodSchema(receiptExtractionSchema),
@@ -133,22 +157,40 @@ export async function extractReceiptFromImage(
     ],
   });
 
-  await addUserTokenUsage(userId, {
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    totalTokens: usage.totalTokens,
-  });
-
-  return object;
+  return {
+    object,
+    usage: {
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+      totalTokens:
+        usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+    },
+  };
 }
+
+export type SyncNewReceiptsResult = {
+  extractedCount: number;
+  usage: TokenReservation;
+};
 
 export async function syncNewReceiptsFromMessages(
   userId: string,
   messages: UIMessage[],
-) {
+  options?: { maxNewExtractions?: number },
+): Promise<SyncNewReceiptsResult> {
+  const maxNewExtractions = Math.max(
+    0,
+    Math.trunc(options?.maxNewExtractions ?? MAX_NEW_EXTRACTIONS_PER_REQUEST),
+  );
   const imageUrls = extractReceiptBlobUrls(messages, userId);
+  let extractedCount = 0;
+  let usage = emptyUsage();
 
   for (const imageUrl of imageUrls) {
+    if (extractedCount >= maxNewExtractions) {
+      break;
+    }
+
     if (isCsvBlobUrl(imageUrl)) {
       continue;
     }
@@ -161,14 +203,19 @@ export async function syncNewReceiptsFromMessages(
 
     try {
       const imageDataUrl = await fetchReceiptBlobAsDataUrl(imageUrl);
-      const extraction = await extractReceiptFromImage(userId, imageDataUrl);
+      const { object: extraction, usage: extractionUsage } =
+        await extractReceiptFromImage(imageDataUrl);
       const messageId = findMessageIdForImageUrl(messages, imageUrl);
 
       await insertSharedReceipt(
         toInsertInput(userId, messageId, imageUrl, extraction),
       );
+      usage = addUsage(usage, extractionUsage);
+      extractedCount += 1;
     } catch (error) {
       console.error("Failed to index shared receipt:", imageUrl, error);
     }
   }
+
+  return { extractedCount, usage };
 }

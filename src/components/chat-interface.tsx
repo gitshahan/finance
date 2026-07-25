@@ -13,6 +13,7 @@ import type { UserTokenUsage } from "@/lib/token-usage-store";
 type ChatInterfaceProps = {
   initialMessages: UIMessage[];
   chatPersistenceEnabled?: boolean;
+  usageTrackingEnabled?: boolean;
   tokenUsage: UserTokenUsage | null;
   onTokenUsageChange: (usage: UserTokenUsage) => void;
 };
@@ -44,6 +45,7 @@ function shouldDeferRefocus(relatedTarget: EventTarget | null) {
 export function ChatInterface({
   initialMessages,
   chatPersistenceEnabled = true,
+  usageTrackingEnabled = true,
   tokenUsage,
   onTokenUsageChange,
 }: ChatInterfaceProps) {
@@ -82,6 +84,7 @@ export function ChatInterface({
   const hasAttachment = Boolean(attachedFile);
   const isAttachmentReady = !hasAttachment || Boolean(uploadedReceipt);
   const canSend =
+    usageTrackingEnabled &&
     Boolean(input.trim() || hasAttachment) &&
     isAttachmentReady &&
     !isUploadingReceipt;
@@ -327,10 +330,14 @@ export function ChatInterface({
           ref={messagesContainerRef}
           className="h-full space-y-4 overflow-y-auto p-6"
         >
-        {!chatPersistenceEnabled ? (
+        {!usageTrackingEnabled ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-            Chat history is not being saved because DATABASE_URL is not
-            configured. Messages will still work for this session.
+            Chat is disabled because DATABASE_URL is not configured. Usage
+            quotas must be enforceable before the assistant can run.
+          </div>
+        ) : !chatPersistenceEnabled ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+            Chat history could not be loaded. New messages may not persist.
           </div>
         ) : null}
 
@@ -489,12 +496,17 @@ export function ChatInterface({
               }}
               placeholder="Ask about a receipt you shared..."
               className="h-12 w-full resize-none overflow-hidden rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none ring-zinc-400 transition focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950"
-              disabled={isSending}
+              disabled={isSending || !usageTrackingEnabled}
             />
           </div>
           <button
             type="submit"
-            disabled={isSending || !canSend || Boolean(tokenUsage?.isQuotaExceeded)}
+            disabled={
+              isSending ||
+              !canSend ||
+              !usageTrackingEnabled ||
+              Boolean(tokenUsage?.isQuotaExceeded)
+            }
             className="h-12 cursor-pointer rounded-xl bg-zinc-900 px-4 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
           >
             {isSending ? "Sending..." : "Send"}

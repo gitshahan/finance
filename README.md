@@ -37,7 +37,7 @@ In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`
 |----------|----------------|------------|
 | Clerk keys | Sign-in, protected routes | App cannot authenticate |
 | `AI_GATEWAY_API_KEY` | Chat replies | Chat API returns 500 |
-| `DATABASE_URL` | Persisted chat, receipt index, token quotas | Session-only chat; banner on dashboard |
+| `DATABASE_URL` | Persisted chat, receipt index, token quotas | Chat API returns 503 (quotas fail closed); banner on dashboard |
 | `BLOB_READ_WRITE_TOKEN` | Uploading receipt images/CSV | Upload fails |
 
 ---
@@ -80,7 +80,7 @@ In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`
 - **Extraction quality** — Depends on model vision/OCR; blurry or cropped receipts may yield null fields; the prompt tells the model not to guess.
 - **Export caps** — At most **200** rows per export (chat tool or API); chat tool may truncate and should inform the user.
 - **API export without UI** — Filtered export of saved receipts requires calling `/api/receipts/export` manually (or re-adding a tab); product flow is export **via chat** (e.g. “export my Netflix rows from the CSV I uploaded”).
-- **Quota model** — Limits (1M total tokens, 286k output tokens, 550 requests tracked) are approximate product guardrails; request count is displayed but **only token totals block** new chat requests today.
+- **Quota model** — Limits (1M total tokens, 286k output tokens, 550 requests) are enforced together. Chat requires `DATABASE_URL` so quotas can fail closed; each request pre-debits an estimated token budget (plus capped receipt extractions) and reconciles to actual usage when the model finishes.
 - **No automated tests** — Manual verification only within the time box.
 - **English-first** — Receipt text and UI copy assume English; no i18n.
 

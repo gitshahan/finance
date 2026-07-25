@@ -41,7 +41,8 @@ export function isReceiptStorageBlobUrl(url: string) {
 }
 
 /**
- * Reject file parts that are not owned receipt blobs (blocks arbitrary https:// URLs).
+ * Reject file parts that are not owned receipt blobs.
+ * Blocks arbitrary https:// URLs and client-supplied data:/blob: bypasses.
  */
 export function messagesOnlyUseOwnedReceiptBlobs(
   userId: string,
@@ -50,11 +51,6 @@ export function messagesOnlyUseOwnedReceiptBlobs(
   for (const message of messages) {
     for (const part of message.parts) {
       if (part.type === "file" && part.url) {
-        // data: / blob: local previews are not persisted blob URLs
-        if (part.url.startsWith("data:") || part.url.startsWith("blob:")) {
-          continue;
-        }
-
         if (!userOwnsReceiptBlobUrl(part.url, userId)) {
           return false;
         }
@@ -169,8 +165,8 @@ export async function prepareMessagesForModel(
             };
           }
 
-          // Drop non-owned / arbitrary remote file parts from model input.
-          if (part.type === "file" && part.url && !part.url.startsWith("data:")) {
+          // Drop non-owned / client data: / arbitrary remote file parts.
+          if (part.type === "file" && part.url) {
             return {
               type: "text" as const,
               text: "[Attached file omitted: not an owned receipt blob.]",
