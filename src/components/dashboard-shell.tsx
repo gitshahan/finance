@@ -41,6 +41,25 @@ function OpenSidebarIcon() {
   );
 }
 
+function NewChatIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-5 w-5"
+      aria-hidden="true"
+    >
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
 export function DashboardShell({
   initialMessages,
   initialChats,
@@ -179,7 +198,7 @@ export function DashboardShell({
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       {chatPersistenceEnabled ? (
         <ChatSidebar
           chats={chats}
@@ -196,19 +215,46 @@ export function DashboardShell({
       ) : null}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
-        <header className="relative z-10 flex shrink-0 items-center gap-3 border-b border-border/80 bg-surface px-3 py-2.5 shadow-[0_1px_0_rgba(15,39,68,0.04),0_4px_12px_rgba(15,39,68,0.06)] dark:shadow-[0_1px_0_rgba(0,0,0,0.2),0_4px_12px_rgba(0,0,0,0.25)]">
+        <header className="relative z-10 flex min-w-0 shrink-0 items-center gap-3 border-b border-border/80 bg-surface px-3 py-2.5 shadow-[0_1px_0_rgba(15,39,68,0.04),0_4px_12px_rgba(15,39,68,0.06)] dark:shadow-[0_1px_0_rgba(0,0,0,0.2),0_4px_12px_rgba(0,0,0,0.25)]">
           {chatPersistenceEnabled && !sidebarOpen ? (
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open chat list"
-              aria-expanded={false}
-              aria-controls="chat-sidebar"
-              title="Open chats"
-              className="cursor-pointer rounded-lg p-2 text-muted transition hover:bg-brand-soft hover:text-brand dark:hover:bg-brand-muted dark:hover:text-brand-strong"
-            >
-              <OpenSidebarIcon />
-            </button>
+            <div className="flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Open chat list"
+                aria-expanded={false}
+                aria-controls="chat-sidebar"
+                title="Open chats"
+                className="group relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-muted transition hover:bg-brand-soft hover:text-brand focus-visible:bg-brand-soft focus-visible:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:bg-brand-muted dark:hover:text-brand-strong dark:focus-visible:bg-brand-muted dark:focus-visible:text-brand-strong"
+              >
+                {/* Mobile: always show expand icon (no hover). Desktop: logo → icon on hover. */}
+                <span className="flex items-center justify-center md:hidden">
+                  <OpenSidebarIcon />
+                </span>
+                <img
+                  src="/vite.svg"
+                  alt=""
+                  width={28}
+                  height={28}
+                  className="hidden h-7 w-7 rounded-md bg-white object-contain p-0.5 shadow-sm transition-opacity md:block md:group-hover:opacity-0 md:group-focus-visible:opacity-0"
+                />
+                <span className="pointer-events-none absolute inset-0 hidden items-center justify-center opacity-0 transition-opacity md:flex md:group-hover:opacity-100 md:group-focus-visible:opacity-100">
+                  <OpenSidebarIcon />
+                </span>
+              </button>
+              {activeChatHasMessages ? (
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => void handleCreateChat()}
+                  aria-label="New chat"
+                  title="New chat"
+                  className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-muted transition hover:bg-brand-soft hover:text-brand focus-visible:bg-brand-soft focus-visible:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-brand-muted dark:hover:text-brand-strong dark:focus-visible:bg-brand-muted dark:focus-visible:text-brand-strong"
+                >
+                  <NewChatIcon />
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           {threadError ? (
@@ -238,7 +284,7 @@ export function DashboardShell({
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <ChatInterface
             key={activeChatId}
             chatId={activeChatId}

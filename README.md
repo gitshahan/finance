@@ -62,7 +62,7 @@ In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`
 | **Queryable memory** | Done | `searchSavedReceipts` / `summarizeSpend` tools; short index summary in system prompt |
 | **Corrections** | Done | `confirmSavedReceipt`, `updateSavedReceipt`, `deleteSavedReceipt`, `setMerchantCategory` |
 | **CSV export** | Done | From attachments, saved index (`filterFromSavedReceipts`), or tiny inline tables |
-| **Spend insights UI** | Done | `summarizeSpend` tool results render as an in-chat table with bar hints |
+| **Spend insights UI** | Done | `summarizeSpend` renders a table (default) or bar chart when `display: chart` |
 | **Token / usage quota** | Done | Per-user totals in Neon; dashboard progress bar; 429 when caps hit |
 | **Assistant HTML rendering** | Done | Model replies in HTML; sanitized with DOMPurify |
 
