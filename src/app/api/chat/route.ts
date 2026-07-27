@@ -33,13 +33,10 @@ import {
   tryReserveChatBudget,
   type TokenReservation,
 } from "@/lib/token-usage-store";
-import { getChatModel } from "@/lib/ai-model";
+import { isLlmCredentialsConfigured } from "@/lib/llm-credentials-store";
+import { resolveReadyOpenAiApiKey } from "@/lib/llm-unlock-session";
 import { createChatTools } from "@/lib/chat-tools";
-import {
-  getUserLlmCredentialStatus,
-  isLlmCredentialsConfigured,
-} from "@/lib/llm-credentials-store";
-import { getUnlockedOpenAiApiKey } from "@/lib/llm-unlock-session";
+import { getChatModel } from "@/lib/ai-model";
 
 export const maxDuration = 60;
 
@@ -104,16 +101,15 @@ export async function POST(request: Request) {
       );
     }
 
-    const apiKey = await getUnlockedOpenAiApiKey(userId);
-    if (!apiKey) {
-      const status = await getUserLlmCredentialStatus(userId, false);
-      return new Response(
-        status.configured
+    const ready = await resolveReadyOpenAiApiKey(userId);
+    if (!ready.ok) {
+      const message =
+        ready.reason === "locked"
           ? "Unlock your API key with your encryption key before chatting."
-          : "Add your OpenAI API key and encryption key before chatting.",
-        { status: 403 },
-      );
+          : "Add your OpenAI API key and encryption key before chatting.";
+      return new Response(message, { status: 403 });
     }
+    const apiKey = ready.apiKey;
 
     // Fail closed: never serve AI without a durable quota store.
     if (!isTokenUsageConfigured()) {

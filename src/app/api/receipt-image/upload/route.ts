@@ -7,6 +7,7 @@ import {
   getReceiptUploadSizeLimitError,
   isSupportedReceiptUpload,
 } from "@/lib/receipt-image-url";
+import { resolveReadyOpenAiApiKey } from "@/lib/llm-unlock-session";
 
 export const maxDuration = 30;
 
@@ -16,6 +17,16 @@ export async function POST(request: Request) {
 
     if (!userId) {
       return new Response("Unauthorized", { status: 401 });
+    }
+
+    const ready = await resolveReadyOpenAiApiKey(userId);
+    if (!ready.ok) {
+      return new Response(
+        ready.reason === "locked"
+          ? "Unlock your API key before uploading."
+          : "Add your OpenAI API key before uploading.",
+        { status: 403 },
+      );
     }
 
     if (!process.env.BLOB_READ_WRITE_TOKEN) {

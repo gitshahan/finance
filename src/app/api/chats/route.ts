@@ -4,6 +4,7 @@ import {
   isChatPersistenceConfigured,
   listChatsByUser,
 } from "@/lib/chat-store";
+import { resolveReadyOpenAiApiKey } from "@/lib/llm-unlock-session";
 
 export async function GET() {
   const { userId } = await auth();
@@ -34,6 +35,19 @@ export async function POST() {
     return Response.json(
       { error: "DATABASE_URL is not configured." },
       { status: 503 },
+    );
+  }
+
+  const ready = await resolveReadyOpenAiApiKey(userId);
+  if (!ready.ok) {
+    return Response.json(
+      {
+        error:
+          ready.reason === "locked"
+            ? "Unlock your API key before creating a chat."
+            : "Add your OpenAI API key before creating a chat.",
+      },
+      { status: 403 },
     );
   }
 
