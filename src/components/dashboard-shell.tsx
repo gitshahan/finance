@@ -6,9 +6,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { ChatInterface } from "@/components/chat-interface";
 import { ChatSidebar } from "@/components/chat-sidebar";
+import { LlmApiKeySetup } from "@/components/llm-api-key-setup";
 import { UserQuotaIndicator } from "@/components/user-quota-indicator";
 import type { ChatThread } from "@/lib/chat-store";
 import { DEFAULT_CHAT_ID } from "@/lib/chat-store";
+import type { UserLlmCredentialStatus } from "@/lib/llm-credentials-store";
 import type { UserTokenUsage } from "@/lib/token-usage-store";
 
 const DESKTOP_SIDEBAR_QUERY = "(min-width: 768px)";
@@ -20,6 +22,8 @@ type DashboardShellProps = {
   chatPersistenceEnabled: boolean;
   usageTrackingEnabled: boolean;
   initialTokenUsage: UserTokenUsage | null;
+  initialLlmCredentialStatus: UserLlmCredentialStatus;
+  llmCredentialsStorageReady: boolean;
 };
 
 function OpenSidebarIcon() {
@@ -60,6 +64,26 @@ function NewChatIcon() {
   );
 }
 
+function KeyIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="15" r="4" />
+      <path d="m10.7 12.3 7.6-7.6" />
+      <path d="M16 5h3v3" />
+    </svg>
+  );
+}
+
 export function DashboardShell({
   initialMessages,
   initialChats,
@@ -67,12 +91,16 @@ export function DashboardShell({
   chatPersistenceEnabled,
   usageTrackingEnabled,
   initialTokenUsage,
+  initialLlmCredentialStatus,
+  llmCredentialsStorageReady,
 }: DashboardShellProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [tokenUsage, setTokenUsage] = useState<UserTokenUsage | null>(
     initialTokenUsage,
   );
+  const [llmStatus, setLlmStatus] = useState(initialLlmCredentialStatus);
+  const [showKeySettings, setShowKeySettings] = useState(false);
   const [chats, setChats] = useState(initialChats);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [activeChatHasMessages, setActiveChatHasMessages] = useState(
@@ -197,6 +225,37 @@ export function DashboardShell({
     }
   }
 
+  if (!llmStatus.configured || !llmStatus.unlocked) {
+    return (
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface">
+          <header className="relative z-10 flex min-w-0 shrink-0 items-center justify-end gap-3 border-b border-border/80 bg-surface px-3 py-2.5">
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox:
+                    "rounded-full border border-border shadow-sm ring-0",
+                  userButtonTrigger:
+                    "cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-brand-ring",
+                },
+              }}
+            />
+          </header>
+          <LlmApiKeySetup
+            initialStatus={llmStatus}
+            storageReady={llmCredentialsStorageReady}
+            onConfigured={(next) => {
+              setLlmStatus(next);
+              if (next.configured && next.unlocked) {
+                router.refresh();
+              }
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       {chatPersistenceEnabled ? (
@@ -265,10 +324,42 @@ export function DashboardShell({
             <div className="min-w-0 flex-1" />
           )}
 
-          <div className="flex shrink-0 items-center gap-4">
+          <div className="relative flex shrink-0 items-center gap-2 sm:gap-4">
             {!chatPersistenceEnabled ? (
               <div className="hidden w-44 sm:block">
                 <UserQuotaIndicator usage={tokenUsage} />
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setShowKeySettings((open) => !open)}
+              aria-label="Manage OpenAI API key"
+              title={
+                llmStatus.keyLastFour
+                  ? `API key ···${llmStatus.keyLastFour}`
+                  : "Manage API key"
+              }
+              className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-muted transition hover:bg-brand-soft hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring dark:hover:bg-brand-muted dark:hover:text-brand-strong"
+            >
+              <KeyIcon />
+              <span className="hidden font-mono text-xs sm:inline">
+                ···{llmStatus.keyLastFour}
+              </span>
+            </button>
+            {showKeySettings ? (
+              <div className="absolute right-0 top-full z-30 mt-2 w-[min(100vw-1.5rem,24rem)]">
+                <LlmApiKeySetup
+                  mode="settings"
+                  initialStatus={llmStatus}
+                  storageReady={llmCredentialsStorageReady}
+                  onClose={() => setShowKeySettings(false)}
+                  onConfigured={(next) => {
+                    setLlmStatus(next);
+                    if (!next.configured || !next.unlocked) {
+                      setShowKeySettings(false);
+                    }
+                  }}
+                />
               </div>
             ) : null}
             <UserButton

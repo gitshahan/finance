@@ -2,7 +2,6 @@ import { auth } from "@clerk/nextjs/server";
 import {
   convertToModelMessages,
   createIdGenerator,
-  gateway,
   stepCountIs,
   streamText,
   type UIMessage,
@@ -34,8 +33,13 @@ import {
   tryReserveChatBudget,
   type TokenReservation,
 } from "@/lib/token-usage-store";
-import { CHAT_MODEL } from "@/lib/ai-model";
+import { getChatModel } from "@/lib/ai-model";
 import { createChatTools } from "@/lib/chat-tools";
+import {
+  getUserLlmCredentialStatus,
+  isLlmCredentialsConfigured,
+} from "@/lib/llm-credentials-store";
+import { getUnlockedOpenAiApiKey } from "@/lib/llm-unlock-session";
 
 export const maxDuration = 60;
 
@@ -93,12 +97,21 @@ export async function POST(request: Request) {
       return new Response("Unauthorized", { status: 401 });
     }
 
-    if (!process.env.AI_GATEWAY_API_KEY) {
+    if (!isLlmCredentialsConfigured()) {
       return new Response(
-        "AI Gateway is not configured (missing AI_GATEWAY_API_KEY).",
-        {
-          status: 500,
-        },
+        "API key storage is not configured (missing DATABASE_URL or encryption secret).",
+        { status: 503 },
+      );
+    }
+
+    const apiKey = await getUnlockedOpenAiApiKey(userId);
+    if (!apiKey) {
+      const status = await getUserLlmCredentialStatus(userId, false);
+      return new Response(
+        status.configured
+          ? "Unlock your API key with your encryption key before chatting."
+          : "Add your OpenAI API key and encryption key before chatting.",
+        { status: 403 },
       );
     }
 
@@ -184,19 +197,11 @@ export async function POST(request: Request) {
     const modelMessages = await convertToModelMessages(preparedMessages);
 
     const result = streamText({
-      model: CHAT_MODEL,
+      model: getChatModel(apiKey),
       system,
       messages: modelMessages,
-      tools: {
-        ...createChatTools({ userId, messages }),
-        // Live web lookup for merchant plans/pricing (works with any gateway model).
-        web_search: gateway.tools.perplexitySearch({
-          maxResults: 6,
-          searchLanguageFilter: ["en"],
-          searchRecencyFilter: "month",
-        }),
-      },
-      // Allow search + answer (and short receipt tool loops).
+      tools: createChatTools({ userId, messages }),
+      // Allow tool loops for receipt search/export/corrections.
       stopWhen: stepCountIs(6),
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
       onFinish: ({ totalUsage }) => {
@@ -236,7 +241,10 @@ export async function POST(request: Request) {
             const syncResult = await syncNewReceiptsFromMessages(
               userId,
               completedMessages,
-              { maxNewExtractions: MAX_NEW_EXTRACTIONS_PER_REQUEST },
+              {
+                maxNewExtractions: MAX_NEW_EXTRACTIONS_PER_REQUEST,
+                apiKey,
+              },
             );
             // Extractions were not in the chat reservation; bill them separately.
             if (syncResult.extractedCount > 0) {
@@ -255,7 +263,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Chat route failed:", error);
     return new Response(
-      "Unable to generate a reply right now. Check server configuration and try again.",
+      "Unable to generate a reply right now. Check your OpenAI API key and try again.",
       { status: 500 },
     );
   }

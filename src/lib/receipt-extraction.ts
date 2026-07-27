@@ -1,7 +1,7 @@
 import { generateObject, zodSchema } from "ai";
 import type { UIMessage } from "ai";
 import { z } from "zod";
-import { CHAT_MODEL } from "@/lib/ai-model";
+import { getChatModel } from "@/lib/ai-model";
 import {
   extractReceiptBlobUrls,
   fetchReceiptBlobAsDataUrl,
@@ -138,9 +138,10 @@ export function countCandidateReceiptExtractions(
 
 export async function extractReceiptFromImage(
   imageDataUrl: string,
+  apiKey: string,
 ): Promise<{ object: ReceiptExtraction; usage: TokenReservation }> {
   const { object, usage } = await generateObject({
-    model: CHAT_MODEL,
+    model: getChatModel(apiKey),
     schema: zodSchema(receiptExtractionSchema),
     maxOutputTokens: 800,
     messages: [
@@ -180,12 +181,13 @@ export type SyncNewReceiptsResult = {
 export async function syncNewReceiptsFromMessages(
   userId: string,
   messages: UIMessage[],
-  options?: { maxNewExtractions?: number },
+  options?: { maxNewExtractions?: number; apiKey?: string },
 ): Promise<SyncNewReceiptsResult> {
   const maxNewExtractions = Math.max(
     0,
     Math.trunc(options?.maxNewExtractions ?? MAX_NEW_EXTRACTIONS_PER_REQUEST),
   );
+  const apiKey = options?.apiKey?.trim();
   const imageUrls = extractReceiptBlobUrls(messages, userId);
   let extractedCount = 0;
   let usage = emptyUsage();
@@ -205,10 +207,14 @@ export async function syncNewReceiptsFromMessages(
       continue;
     }
 
+    if (!apiKey) {
+      break;
+    }
+
     try {
       const imageDataUrl = await fetchReceiptBlobAsDataUrl(imageUrl);
       const { object: extraction, usage: extractionUsage } =
-        await extractReceiptFromImage(imageDataUrl);
+        await extractReceiptFromImage(imageDataUrl, apiKey);
       const messageId = findMessageIdForImageUrl(messages, imageUrl);
 
       await insertSharedReceipt(

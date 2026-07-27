@@ -10,6 +10,12 @@ import {
   type ChatThread,
 } from "@/lib/chat-store";
 import {
+  getUserLlmCredentialStatus,
+  isLlmCredentialsConfigured,
+  type UserLlmCredentialStatus,
+} from "@/lib/llm-credentials-store";
+import { isLlmSessionUnlocked } from "@/lib/llm-unlock-session";
+import {
   getUserTokenUsage,
   isTokenUsageConfigured,
   type UserTokenUsage,
@@ -28,6 +34,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       : DEFAULT_CHAT_ID;
 
   const usageTrackingEnabled = isTokenUsageConfigured();
+  const llmCredentialsStorageReady = isLlmCredentialsConfigured();
   let chatPersistenceEnabled = isChatPersistenceConfigured();
   let initialMessages: UIMessage[] = [];
   let initialChats: ChatThread[] = [
@@ -39,6 +46,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   ];
   let activeChatId = requestedChatId;
   let tokenUsage: UserTokenUsage | null = null;
+  let llmCredentialStatus: UserLlmCredentialStatus = {
+    configured: false,
+    unlocked: false,
+    provider: null,
+    keyLastFour: null,
+    updatedAt: null,
+  };
 
   if (userId && chatPersistenceEnabled) {
     try {
@@ -60,6 +74,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     } catch (error) {
       console.error("Failed to load user token usage:", error);
     }
+
+    if (llmCredentialsStorageReady) {
+      try {
+        const unlocked = await isLlmSessionUnlocked(userId);
+        llmCredentialStatus = await getUserLlmCredentialStatus(
+          userId,
+          unlocked,
+        );
+      } catch (error) {
+        console.error("Failed to load LLM credential status:", error);
+      }
+    }
   }
 
   return (
@@ -71,6 +97,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         chatPersistenceEnabled={chatPersistenceEnabled}
         usageTrackingEnabled={usageTrackingEnabled}
         initialTokenUsage={tokenUsage}
+        initialLlmCredentialStatus={llmCredentialStatus}
+        llmCredentialsStorageReady={llmCredentialsStorageReady}
       />
     </main>
   );
