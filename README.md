@@ -23,7 +23,6 @@ Add to `.env.local`:
 ```bash
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
 CLERK_SECRET_KEY=sk_test_...
-AI_GATEWAY_API_KEY=agw_...
 DATABASE_URL=postgresql://<user>:<password>@<host>/<database>?sslmode=require
 BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 ```
@@ -31,19 +30,22 @@ BLOB_READ_WRITE_TOKEN=vercel_blob_rw_...
 Optional:
 
 ```bash
-AI_CHAT_MODEL=openai/gpt-5.4-nano   # default; must support vision for receipt images
+CREDENTIALS_ENCRYPTION_KEY=<64-hex-chars>   # protects unlock-session cookie; falls back to hash of CLERK_SECRET_KEY
+AI_CHAT_MODEL=gpt-5.4-nano                  # must support vision; `openai/` prefix is stripped if present
 NEXT_PUBLIC_CLERK_SIGN_IN_FORCE_REDIRECT_URL=/dashboard
 NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL=/dashboard
 ```
+
+Each signed-in user pastes their **own OpenAI API key** plus a personal **encryption key** on first visit. The encryption key wraps the API key at rest in Neon and is never stored — unlock again when the session expires (about 12 hours) or on a new device.
 
 In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`. Google and other OAuth providers use `/sso-callback`, then `/dashboard`.
 
 | Variable | Required for | Without it |
 |----------|----------------|------------|
 | Clerk keys | Sign-in, protected routes | App cannot authenticate |
-| `AI_GATEWAY_API_KEY` | Chat replies | Chat API returns 500 |
-| `DATABASE_URL` | Persisted chat, receipt index, token quotas | Chat API returns 503 (quotas fail closed); banner on dashboard |
+| `DATABASE_URL` | Persisted chat, receipt index, token quotas, encrypted API keys | Chat API returns 503; key setup blocked |
 | `BLOB_READ_WRITE_TOKEN` | Uploading receipt images/CSV | Upload fails |
+| User OpenAI API key + encryption key | Chat replies | Dashboard shows setup / unlock gate until the user saves and unlocks |
 
 ---
 
@@ -52,7 +54,8 @@ In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`
 | Area | Status | Notes |
 |------|--------|--------|
 | **Authentication** | Done | Clerk sign-in/sign-up, `proxy.ts` route protection, `/sso-callback` for OAuth |
-| **Receipt-focused chat** | Done | Streaming chat via Vercel AI SDK; tools for search, spend, export, corrections |
+| **Bring-your-own OpenAI key** | Done | Per-user key encrypted with user passphrase; session unlock cookie; setup / unlock gate |
+| **Receipt-focused chat** | Done | Streaming chat via Vercel AI SDK + `@ai-sdk/openai`; tools for search, spend, export, corrections |
 | **Multi-conversation** | Done | `chat_threads` + `chat_id`; switcher on dashboard; receipt index is account-wide |
 | **Image uploads** | Done | Private Vercel Blob under per-user paths; 5MB limit; upload on attach with progress |
 | **CSV attachments** | Done | 1MB limit; parsed in-chat; rows indexed into shared memory with dedupe |
@@ -91,13 +94,14 @@ In the Clerk Dashboard, set **Home URL** and post-auth redirects to `/dashboard`
 ## Project layout (high level)
 
 ```
-src/app/api/chat/          # Streaming assistant + persistence
-src/app/api/chats/         # List/create/rename/delete conversations
-src/app/api/receipt-image/ # Upload + authenticated blob proxy
-src/app/api/receipts/      # List/filter saved receipts (JSON + CSV export)
-src/components/            # Chat UI, thread switcher, spend summary, quota bar
-src/lib/                   # DB, blobs, extraction, CSV index, tools, prompts
-src/proxy.ts               # Clerk middleware (protected routes)
+src/app/api/chat/              # Streaming assistant + persistence
+src/app/api/chats/             # List/create/rename/delete conversations
+src/app/api/llm-credentials/   # Save/update/remove per-user OpenAI API key
+src/app/api/receipt-image/     # Upload + authenticated blob proxy
+src/app/api/receipts/          # List/filter saved receipts (JSON + CSV export)
+src/components/                # Chat UI, API key gate, threads, spend, quota
+src/lib/                       # DB, blobs, extraction, encrypted keys, tools
+src/proxy.ts                   # Clerk middleware (protected routes)
 ```
 
 ## Deploy
