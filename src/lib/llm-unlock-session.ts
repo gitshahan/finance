@@ -1,5 +1,9 @@
 import { cookies } from "next/headers";
 import { decryptSecret, encryptSecret } from "@/lib/crypto-secrets";
+import {
+  getUserLlmCredentialStatus,
+  isLlmCredentialsConfigured,
+} from "@/lib/llm-credentials-store";
 
 export const LLM_UNLOCK_COOKIE = "finance_llm_unlock";
 
@@ -11,6 +15,13 @@ type UnlockPayload = {
   apiKey: string;
   expiresAt: number;
 };
+
+export type ReadyOpenAiApiKeyResult =
+  | { ok: true; apiKey: string }
+  | {
+      ok: false;
+      reason: "storage_unavailable" | "not_configured" | "locked";
+    };
 
 function serializeUnlock(payload: UnlockPayload) {
   return encryptSecret(JSON.stringify(payload));
@@ -76,4 +87,46 @@ export async function getUnlockedOpenAiApiKey(
 
 export async function isLlmSessionUnlocked(userId: string) {
   return Boolean(await getUnlockedOpenAiApiKey(userId));
+}
+
+/**
+ * Resolve a usable OpenAI key only when the user has saved credentials in the
+ * database AND unlocked this browser session. Clears stale unlock cookies when
+ * no saved key exists (e.g. returning users who never finished setup).
+ */
+export async function resolveReadyOpenAiApiKey(
+  userId: string,
+): Promise<ReadyOpenAiApiKeyResult> {
+  if (!isLlmCredentialsConfigured()) {
+    await clearLlmUnlockSession();
+    return { ok: false, reason: "storage_unavailable" };
+  }
+
+  const status = await getUserLlmCredentialStatus(userId, false);
+  if (!status.configured) {
+    await clearLlmUnlockSession();
+    return { ok: false, reason: "not_configured" };
+  }
+
+  const apiKey = await getUnlockedOpenAiApiKey(userId);
+  if (!apiKey) {
+    return { ok: false, reason: "locked" };
+  }
+
+  return { ok: true, apiKey };
+}
+
+/** Load credential status for UI. Does not mutate cookies (safe in Server Components). */
+export async function loadUserLlmCredentialStatus(userId: string) {
+  if (!isLlmCredentialsConfigured()) {
+    return getUserLlmCredentialStatus(userId, false);
+  }
+
+  const saved = await getUserLlmCredentialStatus(userId, false);
+  if (!saved.configured) {
+    return saved;
+  }
+
+  const unlocked = await isLlmSessionUnlocked(userId);
+  return getUserLlmCredentialStatus(userId, unlocked);
 }

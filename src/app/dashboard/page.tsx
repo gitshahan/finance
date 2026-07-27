@@ -10,11 +10,10 @@ import {
   type ChatThread,
 } from "@/lib/chat-store";
 import {
-  getUserLlmCredentialStatus,
   isLlmCredentialsConfigured,
   type UserLlmCredentialStatus,
 } from "@/lib/llm-credentials-store";
-import { isLlmSessionUnlocked } from "@/lib/llm-unlock-session";
+import { loadUserLlmCredentialStatus } from "@/lib/llm-unlock-session";
 import {
   getUserTokenUsage,
   isTokenUsageConfigured,
@@ -53,6 +52,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     keyLastFour: null,
     updatedAt: null,
   };
+  let hasExistingAccountData = false;
 
   if (userId && chatPersistenceEnabled) {
     try {
@@ -62,6 +62,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         ? requestedChatId
         : DEFAULT_CHAT_ID;
       initialMessages = await loadMessagesByUser(userId, activeChatId);
+      hasExistingAccountData =
+        initialMessages.length > 0 || initialChats.length > 1;
     } catch (error) {
       chatPersistenceEnabled = false;
       console.error("Failed to load persisted chat messages:", error);
@@ -71,34 +73,49 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   if (userId) {
     try {
       tokenUsage = await getUserTokenUsage(userId);
+      if (
+        tokenUsage &&
+        (tokenUsage.requestCount > 0 || tokenUsage.totalTokens > 0)
+      ) {
+        hasExistingAccountData = true;
+      }
     } catch (error) {
       console.error("Failed to load user token usage:", error);
     }
 
-    if (llmCredentialsStorageReady) {
-      try {
-        const unlocked = await isLlmSessionUnlocked(userId);
-        llmCredentialStatus = await getUserLlmCredentialStatus(
-          userId,
-          unlocked,
-        );
-      } catch (error) {
-        console.error("Failed to load LLM credential status:", error);
-      }
+    // Always resolve credentials for signed-in users so missing keys hard-block
+    // the dashboard — including accounts that already have chat history.
+    try {
+      llmCredentialStatus = await loadUserLlmCredentialStatus(userId);
+    } catch (error) {
+      console.error("Failed to load LLM credential status:", error);
+      llmCredentialStatus = {
+        configured: false,
+        unlocked: false,
+        provider: null,
+        keyLastFour: null,
+        updatedAt: null,
+      };
     }
   }
+
+  const llmReady =
+    llmCredentialsStorageReady &&
+    llmCredentialStatus.configured &&
+    llmCredentialStatus.unlocked;
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <DashboardShell
-        initialMessages={initialMessages}
+        initialMessages={llmReady ? initialMessages : []}
         initialChats={initialChats}
         activeChatId={activeChatId}
-        chatPersistenceEnabled={chatPersistenceEnabled}
+        chatPersistenceEnabled={llmReady && chatPersistenceEnabled}
         usageTrackingEnabled={usageTrackingEnabled}
-        initialTokenUsage={tokenUsage}
+        initialTokenUsage={llmReady ? tokenUsage : null}
         initialLlmCredentialStatus={llmCredentialStatus}
         llmCredentialsStorageReady={llmCredentialsStorageReady}
+        hasExistingAccountData={hasExistingAccountData}
       />
     </main>
   );

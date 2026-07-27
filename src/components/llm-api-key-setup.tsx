@@ -13,6 +13,8 @@ type LlmApiKeySetupProps = {
   /** Compact settings panel vs full-screen first-run / unlock gate. */
   mode?: "gate" | "settings";
   onClose?: () => void;
+  /** Returning users with chat/usage history but no saved API key. */
+  hasExistingAccountData?: boolean;
 };
 
 export function LlmApiKeySetup({
@@ -21,6 +23,7 @@ export function LlmApiKeySetup({
   onConfigured,
   mode = "gate",
   onClose,
+  hasExistingAccountData = false,
 }: LlmApiKeySetupProps) {
   const [apiKey, setApiKey] = useState("");
   const [encryptionKey, setEncryptionKey] = useState("");
@@ -162,13 +165,17 @@ export function LlmApiKeySetup({
     ? "Unlock your API key"
     : status.configured
       ? "API key & encryption"
-      : "Add your OpenAI API key";
+      : hasExistingAccountData
+        ? "Add your API key to continue"
+        : "Add your OpenAI API key";
 
   const description = needsUnlock
     ? `Enter the encryption key for the saved OpenAI key ending in ···${status.keyLastFour}. It is never stored on the server.`
     : status.configured
       ? `Saved key ending in ···${status.keyLastFour}. Replacing requires a new encryption key; usage is billed to your OpenAI account.`
-      : "Provide an OpenAI API key and your own encryption key. The encryption key locks the API key at rest and is never saved.";
+      : hasExistingAccountData
+        ? "Your account already has saved chats, but chat is locked until you add an OpenAI API key and encryption key."
+        : "Provide an OpenAI API key and your own encryption key. The encryption key locks the API key at rest and is never saved.";
 
   const panel = (
     <div

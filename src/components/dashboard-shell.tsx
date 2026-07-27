@@ -24,6 +24,7 @@ type DashboardShellProps = {
   initialTokenUsage: UserTokenUsage | null;
   initialLlmCredentialStatus: UserLlmCredentialStatus;
   llmCredentialsStorageReady: boolean;
+  hasExistingAccountData?: boolean;
 };
 
 function OpenSidebarIcon() {
@@ -64,6 +65,26 @@ function NewChatIcon() {
   );
 }
 
+function KeyIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <circle cx="8" cy="15" r="4" />
+      <path d="m10.7 12.3 7.6-7.6" />
+      <path d="M16 5h3v3" />
+    </svg>
+  );
+}
+
 export function DashboardShell({
   initialMessages,
   initialChats,
@@ -73,6 +94,7 @@ export function DashboardShell({
   initialTokenUsage,
   initialLlmCredentialStatus,
   llmCredentialsStorageReady,
+  hasExistingAccountData = false,
 }: DashboardShellProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -224,6 +246,7 @@ export function DashboardShell({
           <LlmApiKeySetup
             initialStatus={llmStatus}
             storageReady={llmCredentialsStorageReady}
+            hasExistingAccountData={hasExistingAccountData}
             onConfigured={(next) => {
               setLlmStatus(next);
               if (next.configured && next.unlocked) {

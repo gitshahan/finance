@@ -121,6 +121,12 @@ export async function getUserLlmCredentialStatus(
   };
 }
 
+/** True when this user has a saved OpenAI API key row (regardless of unlock). */
+export async function userHasSavedLlmCredentials(userId: string) {
+  const status = await getUserLlmCredentialStatus(userId, false);
+  return status.configured;
+}
+
 /**
  * Decrypt the stored OpenAI key with the user's encryption passphrase.
  * Returns null when missing or the passphrase is wrong.
