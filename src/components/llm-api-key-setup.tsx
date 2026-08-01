@@ -354,6 +354,7 @@ export function LlmApiKeySetup({
                 type="button"
                 disabled={isLocking}
                 onClick={() => void handleLock()}
+                title="Clear temporary access in this browser without deleting your saved key"
                 className="rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
               >
                 {isLocking ? "Locking…" : "Lock session"}
@@ -370,6 +371,14 @@ export function LlmApiKeySetup({
               </button>
             ) : null}
           </div>
+
+          {status.configured && status.unlocked ? (
+            <p className="text-xs text-muted">
+              Lock session ends temporary access in this browser without
+              deleting your saved key. You&apos;ll need your encryption key to
+              unlock again. Sessions also expire after 12 hours.
+            </p>
+          ) : null}
 
           <p className="text-xs text-muted">
             {isSetup
