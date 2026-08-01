@@ -37,6 +37,7 @@ import { isLlmCredentialsConfigured } from "@/lib/llm-credentials-store";
 import { resolveReadyOpenAiApiKey } from "@/lib/llm-unlock-session";
 import { createChatTools } from "@/lib/chat-tools";
 import { getChatModel } from "@/lib/ai-model";
+import { toUserFacingChatError } from "@/lib/chat-errors";
 
 export const maxDuration = 60;
 
@@ -192,6 +193,8 @@ export async function POST(request: Request) {
     ]);
     const modelMessages = await convertToModelMessages(preparedMessages);
 
+    let usageHandled = false;
+
     const result = streamText({
       model: getChatModel(apiKey),
       system,
@@ -200,7 +203,31 @@ export async function POST(request: Request) {
       // Allow tool loops for receipt search/export/corrections.
       stopWhen: stepCountIs(6),
       maxOutputTokens: CHAT_MAX_OUTPUT_TOKENS,
+      onError: ({ error }) => {
+        console.error("Chat stream failed:", error);
+        // Release the pre-reserved budget when the model never finishes.
+        // Deferred so a successful onFinish (if any) can claim settlement first.
+        after(async () => {
+          if (usageHandled) {
+            return;
+          }
+          usageHandled = true;
+          try {
+            await reconcileReservedTokenUsage(userId, reservation, {
+              inputTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+            });
+          } catch (reconcileError) {
+            console.error("Failed to release chat reservation:", reconcileError);
+          }
+        });
+      },
       onFinish: ({ totalUsage }) => {
+        if (usageHandled) {
+          return;
+        }
+        usageHandled = true;
         // Don't await DB work here — AI SDK holds the stream open until onFinish
         // resolves, which leaves the client send button stuck in "streaming".
         const chatUsage: TokenReservation = {
@@ -226,8 +253,17 @@ export async function POST(request: Request) {
         prefix: "msg",
         size: 16,
       }),
-      onFinish: ({ messages: completedMessages }) => {
+      onError: (error) => {
+        console.error("Chat UI stream error:", error);
+        return toUserFacingChatError(error);
+      },
+      onFinish: ({ messages: completedMessages, isAborted, finishReason }) => {
         if (!isChatPersistenceConfigured()) {
+          return;
+        }
+
+        // Skip persistence when the stream aborted or never finished (e.g. provider error).
+        if (isAborted || !finishReason) {
           return;
         }
 
@@ -258,9 +294,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Chat route failed:", error);
-    return new Response(
-      "Unable to generate a reply right now. Check your OpenAI API key and try again.",
-      { status: 500 },
-    );
+    return new Response(toUserFacingChatError(error), { status: 500 });
   }
 }
