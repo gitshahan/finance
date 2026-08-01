@@ -30,6 +30,34 @@ const DEFAULT_RECEIPT_CSV_PROMPT =
 // Treat as "at bottom" within this distance (covers floating ask bar padding).
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 
+const FALLBACK_CHAT_ERROR =
+  "Could not get a reply. Please check your OpenAI API key and try again.";
+
+/** DefaultChatTransport puts the response body into Error.message — unwrap JSON `{ error }`. */
+function formatChatErrorMessage(error: Error | undefined): string | null {
+  if (!error) {
+    return null;
+  }
+
+  const raw = error.message?.trim();
+  if (!raw) {
+    return FALLBACK_CHAT_ERROR;
+  }
+
+  if (raw.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error.trim()) {
+        return parsed.error.trim();
+      }
+    } catch {
+      // keep the raw body
+    }
+  }
+
+  return raw;
+}
+
 function shouldDeferRefocus(relatedTarget: EventTarget | null) {
   if (!relatedTarget || !(relatedTarget instanceof HTMLElement)) {
     return false;
@@ -74,7 +102,7 @@ export function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const didInitialScrollRef = useRef(false);
   const stickToBottomRef = useRef(true);
-  const { messages, sendMessage, status, error } = useChat({
+  const { messages, sendMessage, status, error, clearError } = useChat({
     id: chatId,
     messages: initialMessages,
     transport: new DefaultChatTransport({
@@ -83,6 +111,8 @@ export function ChatInterface({
     }),
   });
   const prevStatusRef = useRef(status);
+
+  const chatErrorMessage = formatChatErrorMessage(error);
 
   const isSending = status === "submitted" || status === "streaming";
   const isEmptyChat = messages.length === 0;
@@ -379,9 +409,9 @@ export function ChatInterface({
     const wasBusy =
       prevStatusRef.current === "submitted" ||
       prevStatusRef.current === "streaming";
-    const isReady = status === "ready";
+    const settled = status === "ready" || status === "error";
 
-    if (wasBusy && isReady) {
+    if (wasBusy && settled) {
       void fetch("/api/token-usage")
         .then((response) => {
           if (!response.ok) {
@@ -402,6 +432,12 @@ export function ChatInterface({
 
     prevStatusRef.current = status;
   }, [status, onTokenUsageChange]);
+
+  useEffect(() => {
+    if (chatErrorMessage) {
+      pinToBottom();
+    }
+  }, [chatErrorMessage]);
 
   useEffect(() => {
     onHasMessagesChange?.(!isEmptyChat);
@@ -653,13 +689,6 @@ export function ChatInterface({
             </div>
           ) : null}
 
-          {error ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">
-              {error.message ||
-                "Could not get a reply. Please check your configuration and try again."}
-            </div>
-          ) : null}
-
           {messages.map((message, messageIndex) => {
             const isLastMessage = messageIndex === messages.length - 1;
             const isAssistantLoading =
@@ -726,6 +755,32 @@ export function ChatInterface({
               />
               <div className="min-w-0 flex-1 rounded-2xl bg-surface-muted px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight text-muted">
                 Working on your request…
+              </div>
+            </div>
+          ) : null}
+
+          {chatErrorMessage ? (
+            <div
+              role="alert"
+              className="flex min-w-0 items-start gap-2.5 justify-start"
+            >
+              <img
+                src="/vite.svg"
+                alt=""
+                width={28}
+                height={28}
+                className="mt-0.5 box-border h-7 w-7 shrink-0 rounded-full border border-border bg-white object-contain shadow-sm"
+              />
+              <div className="min-w-0 flex-1 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-[0.9375rem] leading-relaxed tracking-tight text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-100">
+                <p className="font-medium">Couldn’t generate a reply</p>
+                <p className="mt-1 text-sm opacity-95">{chatErrorMessage}</p>
+                <button
+                  type="button"
+                  onClick={() => clearError()}
+                  className="mt-3 text-sm font-semibold text-red-900 underline-offset-2 hover:underline dark:text-red-50"
+                >
+                  Dismiss
+                </button>
               </div>
             </div>
           ) : null}
